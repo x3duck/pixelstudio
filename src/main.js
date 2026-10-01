@@ -251,7 +251,7 @@ function render(t) {
   U.uTime.value = u;
   U.uTf.value = Math.floor(u * 12) / 12;
   U.uHead.value.copy(headPx);
-  U.uLag.value.set(THREE.MathUtils.clamp((lagPx.x - headPx.x) * 0.9, -9, 9), THREE.MathUtils.clamp((lagPx.y - headPx.y) * 0.5, -5, 5));
+  U.uLag.value.set(THREE.MathUtils.clamp((lagPx.x - headPx.x) * 0.9 + 1.3 * p0.breathLate, -9, 9), THREE.MathUtils.clamp((lagPx.y - headPx.y) * 0.5, -5, 5));
   U.uFace.value = 1;
   U.uFlick.value = flick;
   U.uShadowX.value = (R.root.position.x - cam.position.x) / wpp;

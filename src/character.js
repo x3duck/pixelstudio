@@ -148,10 +148,10 @@ function group(parent, pos = [0, 0, 0], name = '') {
 }
 
 // torn cloth panel: top width w0, bottom width w1, with 2-3 px notches cut into the hem and one side
-function raggedPts(w0, w1, len, seed = 0) {
+function raggedPts(w0, w1, len, seed = 0, notch = 3.0) {
   const sx = (y) => (w0 + (w1 - w0) * (-y / len)) / 2;
   const j = (k) => 0.12 * Math.sin(seed * 7.1 + k * 3.7);
-  const nd = Math.min(3.0, len * 0.35);   // notch depth (art px)
+  const nd = Math.min(notch, len * 0.35);   // notch depth (art px)
   return [
     [-w0 / 2, 0], [w0 / 2, 0],
     [sx(-len * 0.5), -len * 0.5], [sx(-len * 0.58) - 1.8, -len * (0.6 + j(1))], [sx(-len * 0.68), -len * 0.7],
@@ -167,7 +167,7 @@ function raggedPts(w0, w1, len, seed = 0) {
 }
 
 // cloth chain: returns array of segment groups (each pivots at its top)
-function clothChain(parent, pos, segs, mat, { thick = 1.2, tatter = true, lining = null, seed = 0 } = {}) {
+function clothChain(parent, pos, segs, mat, { thick = 1.2, tatter = true, lining = null, seed = 0, notch = 3.0 } = {}) {
   const out = [];
   let p = group(parent, pos);
   p.rotation.order = 'ZXY';
@@ -176,7 +176,7 @@ function clothChain(parent, pos, segs, mat, { thick = 1.2, tatter = true, lining
     const last = i === segs.length - 1;
     let geo;
     if (last && tatter) {
-      geo = extrude(raggedPts(w0, w1, len, seed + i), thick);
+      geo = extrude(raggedPts(w0, w1, len, seed + i, notch), thick);
     } else {
       const g2 = new THREE.BoxGeometry(1, len, thick);
       const pa = g2.attributes.position;
@@ -218,17 +218,18 @@ export function buildCharacter() {
     const sx = side === 'l' ? 1 : -1;
     const hip = group(pelvis, [sx * DIM.HX, 0, 0], side + 'Thigh');
     hip.rotation.order = 'ZXY';
-    mesh(lathe([[0.1, 1.5], [3.8, 1.5], [4.8, -3], [6.4, -9], [7.2, -13.5], [6.3, -17], [0.1, -18]].map(([r, y]) => [r, y * LY]), 7, side === 'l' ? 0.3 : 0.1),
+    mesh(lathe([[0.1, 1.5], [3.8, 1.5], [4.3, -3], [5.0, -9], [5.7, -14], [5.9, -17], [0.1, -18.5]].map(([r, y]) => [r, y * LY]), 7, side === 'l' ? 0.3 : 0.1),
       M.navy, hip, [0, 0, 0]);
     const knee = group(hip, [0, -DIM.L1, 0], side + 'Shin');
-    mesh(lathe([[0.1, 1.5], [6.4, 1.0], [6.8, -2.5], [5.6, -6.5], [3.8, -10.5], [3.1, -13], [0.1, -14]].map(([r, y]) => [r, y * LY]), 7, 0.2),
+    mesh(lathe([[0.1, 1.5], [5.9, 1.0], [6.0, -1.5], [5.3, -4.5], [4.3, -7.5], [3.4, -10], [3.1, -11], [0.1, -11.5]].map(([r, y]) => [r, y * LY]), 7, 0.2),
       M.navy, knee, [0, 0, 0]);
-    // dark wrap band where the balloon tucks into the boot
-    mesh(lathe([[3.8, -10.2], [4.7, -11.5], [3.7, -13.0]], 7, 0.5), M.dark, knee, [0, 0, 0]);
+    // dark ankle wrap (about half the knee balloon), then a 1 px pinch above the boot cuff
+    mesh(lathe([[3.1, -10.6], [3.6, -11.6], [3.3, -12.7]], 7, 0.5), M.cuff, knee, [0, 0, 0]);
+    mesh(lathe([[2.5, -12.5], [2.5, -14.2]], 7, 0.5), M.dark, knee, [0, 0, 0]);
     const ankle = group(knee, [0, -DIM.L2, 0], side + 'Boot');
-    mesh(lathe([[0.1, 6.5], [5.4, 6.5], [5.6, 4.5], [4.5, 3.8], [4.6, -3], [5.0, -6], [0.1, -6]], 6, 0.3), M.leather, ankle, [0, 0, 0]);
-    // folded cuff (one value step lighter)
-    mesh(lathe([[5.5, 6.6], [6.2, 5.4], [5.7, 4.0]], 6, 0.3), M.cuff, ankle, [0, 0, 0]);
+    mesh(lathe([[0.1, 3.9], [5.0, 3.9], [5.4, 2.6], [4.7, 1.8], [4.8, -3], [5.2, -6], [0.1, -6]], 6, 0.3), M.leather, ankle, [0, 0, 0]);
+    // chunky folded cuff (one value step lighter)
+    mesh(lathe([[5.0, 4.0], [6.2, 3.3], [6.4, 2.2], [5.5, 1.4]], 6, 0.3), M.cuff, ankle, [0, 0, 0]);
     mesh(tbox(7.6, 5.5, 14.5, { tx: 0.9, tz: 0.75, shiftTopZ: -1.5 }), M.leather, ankle, [0, -5.2, 3.0]);
     mesh(tbox(8.0, 1.7, 15.5), M.dark, ankle, [0, -7.6, 3.4]);
     // toe cap jutting forward
@@ -245,10 +246,10 @@ export function buildCharacter() {
   mesh(tbox(3.6, 4.6, 3.2, { tx: 0.9 }), M.leather, pelvis, [-5.4, sashY - 4.2, 2.6], [0, 0, -0.15]);
   mesh(tbox(4.0, 1.3, 3.6), M.metalDark, pelvis, [-5.4, sashY - 2.0, 2.6], [0, 0, -0.15]);
   // ragged coat skirt: one long torn flap on the near side (asymmetric), a near hip panel, back tails
-  R.flapF = clothChain(pelvis, [-3.4, 2.0, 5.0], [[6.2, 6.4, 6], [6.4, 6.0, 6], [6.0, 5.6, 7.5]], M.coat2, { thick: 1.0, seed: 3 });
+  R.flapF = clothChain(pelvis, [-5.6, 2.0, 4.4], [[5.2, 5.4, 5], [5.4, 4.6, 6.5]], M.coat2, { thick: 1.0, seed: 3 });
   R.hipR = clothChain(pelvis, [-6.0, 2.5, 0.6], [[5, 5.5, 7], [5.5, 5, 6]], M.coat, { thick: 1.0, seed: 5 });
-  R.tailL = clothChain(pelvis, [3.0, 3, -4.6], [[7, 7, 8], [7, 6.5, 8], [6.5, 6, 8]], M.coat, { thick: 1.0, seed: 6 });
-  R.tailR = clothChain(pelvis, [-3.0, 3, -4.6], [[7, 6.8, 8], [6.8, 6.4, 8], [6.4, 5.5, 8]], M.coat, { thick: 1.0, seed: 7 });
+  R.tailL = clothChain(pelvis, [4.2, 3, -4.6], [[7, 7, 8], [7, 6.5, 8], [6.5, 6, 8]], M.coat, { thick: 1.0, seed: 6 });
+  R.tailR = clothChain(pelvis, [-4.2, 3, -4.6], [[7, 6.8, 8], [6.8, 6.4, 8], [6.4, 5.5, 8]], M.coat, { thick: 1.0, seed: 7 });
 
   // ---- spine / chest: V taper, moderate shoulders ----
   const spine = group(pelvis, [0, 5.5, 0], 'Torso');
@@ -275,7 +276,7 @@ export function buildCharacter() {
   mesh(tbox(11.4, 1.4, 10.8, { tx: 1.05 }), M.dark, chest, [0, 1.6, -0.4]);
   // back plate + shoulder yoke (near-black gorget)
   mesh(tbox(13, 12, 3, { tx: 1.2 }), M.metalDark, chest, [0, 7, -5.6]);
-  mesh(tbox(18.5, 4, 10.5, { tx: 0.9 }), M.metalDark, chest, [0, 13, -0.6]);
+  R.yoke = mesh(tbox(22, 4, 10.5, { tx: 0.88 }), M.metalDark, chest, [0, 13, -0.6]);
 
   // collar / neck: dark flared collar the flame rises from (no warm band)
   const neck = group(chest, [0, 15, 0.5], 'Neck');
@@ -289,16 +290,16 @@ export function buildCharacter() {
 
   // scarf: a crimson wrap band across the front of the collar + two short tails off the near/back shoulder
   mesh(lathe([[7.0, -0.2], [8.0, -1.1], [7.8, -2.8], [6.6, -3.3]], 8, 0.4), M.crimson, neck, [0, 0.4, 0.3], [0.22, 0, -0.1]);
-  R.scarf = clothChain(neck, [-5.6, -2.2, -3.4], [[5.2, 4.8, 5.5], [4.8, 4.4, 5.5], [4.4, 4.0, 5.5], [4.0, 3.6, 5.5], [3.6, 3.2, 5.5], [3.2, 2.8, 6]], M.crimson, { thick: 1.3, seed: 8 });
+  R.scarf = clothChain(neck, [-7.2, -1.0, -3.0], [[5.0, 4.6, 4.5], [4.6, 4.3, 4.5], [4.3, 4.1, 4.5], [4.1, 4.0, 4.5], [4.0, 3.9, 4.5], [3.9, 5.4, 5.5]], M.crimson, { thick: 1.3, seed: 8, notch: 2.6 });
   R.scarf2 = clothChain(neck, [-3.6, -2, -4.6], [[3.4, 3.0, 5.5], [3.0, 2.6, 5.5], [2.6, 2.3, 5.5], [2.3, 2.0, 5.5]], M.crimsonDark, { thick: 1.2, seed: 9 });
 
   // tattered half-mantle hanging behind the near shoulder (frames the body), plum lining at the edges
-  R.mantle = clothChain(chest, [-8.6, 14.0, -4.8], [[10, 10.5, 8], [10.5, 9, 8], [9, 6.5, 9]], M.coat, { thick: 1.2, lining: M.plum, seed: 10 });
+  R.mantle = clothChain(chest, [-8.6, 14.0, -4.8], [[10, 10.5, 8], [10.5, 9.5, 9], [9.5, 8.5, 14]], M.coat, { thick: 1.2, lining: M.plum, seed: 10, notch: 5.5 });
 
   // ---- arms ----
   for (const side of ['l', 'r']) {
     const sx = side === 'l' ? 1 : -1;
-    const sh = group(chest, [sx * 9.9, 11.5, -0.5], side + 'Arm');
+    const sh = group(chest, [sx * 10.4, 11.5, -0.5], side + 'Arm');
     sh.rotation.order = 'ZXY';
     mesh(lathe([[0.1, 2], [3.6, 2], [4.2, -3], [4.0, -8], [3.3, -11.5], [0.1, -12]], 6, 0.3), M.coat2, sh, [0, 0, 0]);
     const el = group(sh, [0, -11.5, 0], side + 'Fore');
@@ -334,7 +335,8 @@ export function buildCharacter() {
   // layered pauldron on the far (left) shoulder with a swept horn crest (scaled down for a leaner silhouette)
   const pl = group(R.lArm, [0.6, 1.2, 0], 'PauldronL');
   pl.rotation.z = -0.35;
-  pl.scale.setScalar(0.68);
+  pl.scale.setScalar(0.85);
+  R.pl = pl;
   mesh(dome(10.5, 7, 3), M.metal, pl, [1.5, 0, 0], [0, 0, 0], [1.05, 0.72, 1.0]);
   mesh(dome(11.5, 7, 2, Math.PI / 2), M.metalDark, pl, [2.5, -3.6, 0], [0, 0, 0], [1.0, 0.45, 1.0]);
   mesh(dome(11.0, 7, 2, Math.PI / 2), M.metalDark, pl, [3.5, -6.6, 0], [0, 0, 0], [0.95, 0.4, 0.95]);
@@ -351,11 +353,14 @@ export function buildCharacter() {
     hp = n;
   }
   // small pauldron + leather strap on the near (sword) shoulder
-  const pr = group(R.rArm, [-0.4, 1.4, 0], 'PauldronR');
-  pr.rotation.z = 0.25;
-  pr.scale.setScalar(0.88);
-  mesh(dome(6.8, 6, 2), M.metalDark, pr, [-0.8, 0, 0], [0, 0, 0], [1.0, 0.75, 1.0]);
-  mesh(tbox(2.5, 9, 7), M.leather, pr, [-3.5, -4, 0], [0, 0, 0.25]);
+  const pr = group(R.rArm, [-0.6, 1.4, 0], 'PauldronR');
+  pr.rotation.z = 0.3;
+  pr.scale.setScalar(1.0);
+  R.pr = pr;
+  // layered: a dark dome over a lighter lame that overhangs the upper arm by 3-4 px
+  mesh(dome(7.4, 6, 2), M.metalDark, pr, [-1.2, 0, 0], [0, 0, 0], [1.12, 0.72, 1.05]);
+  mesh(dome(7.8, 6, 2, Math.PI / 2), M.metal, pr, [-2.0, -3.2, 0], [0, 0, 0], [1.05, 0.4, 1.0]);
+  mesh(tbox(2.5, 9, 7), M.leather, pr, [-3.5, -5, 0], [0, 0, 0.25]);
 
   // ---- weapon: short, slightly curved blade: bright 1 px edge / mid-gray flat / dark spine ----
   const weapon = group(R.rHand, [0, -1.5, 0.4], 'WeaponRoot');
@@ -383,7 +388,12 @@ export function buildCharacter() {
 }
 
 // ---------- leg IK ----------
-function solveLeg(thigh, shin, boot, hipPos, target, toe) {
+// Two-bone solve in the hip's vertical plane, then the whole leg is swivelled about the hip->ankle axis
+// (knees bow outward so the bend reads in the picture plane, not only in depth). The boot is set to a
+// flat, yawed orientation (turn-out) independent of the leg chain.
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
+const _ax = new THREE.Vector3(), _eu = new THREE.Euler(), _ez = new THREE.Euler();
+function solveLeg(thigh, shin, boot, hipPos, target, toe, swivel, footYaw, roll) {
   const { L1, L2 } = DIM;
   const vx = target.x - hipPos.x, vy = target.y - hipPos.y, vz = target.z - hipPos.z;
   const gamma = Math.atan2(vx, -vy);
@@ -395,17 +405,25 @@ function solveLeg(thigh, shin, boot, hipPos, target, toe) {
   const kneeInt = Math.acos(clamp((L1 * L1 + L2 * L2 - L * L) / (2 * L1 * L2), -1, 1));
   const knee = Math.PI - kneeInt;
   const hipF = alpha + a1;
-  thigh.rotation.set(-hipF, 0, gamma);
+  _eu.set(-hipF, 0, gamma, 'ZXY'); _qa.setFromEuler(_eu);
+  _ax.set(vx, vy, vz).normalize(); _qb.setFromAxisAngle(_ax, swivel);
+  _qb.multiply(_qa);                                  // thigh orientation in the (unrolled) hip frame
   shin.rotation.set(knee, 0, 0);
-  boot.rotation.set(hipF - knee + toe - 0.1, 0, -gamma * 0.8);
+  // boot: flat on the floor (keeps 20% of the sideways leg lean), toe pitch + yaw turn-out
+  _eu.set(toe - 0.1, footYaw, 0.2 * gamma, 'YXZ'); _qc.setFromEuler(_eu);
+  _qa.copy(_qb).multiply(shin.quaternion).invert();
+  boot.quaternion.multiplyQuaternions(_qa, _qc);
+  // the pelvis is rolled: counter-rotate the thigh about z (outermost)
+  _ez.set(0, 0, -roll); _qa.setFromEuler(_ez);
+  thigh.quaternion.multiplyQuaternions(_qa, _qb);
 }
 
 // ---------- apply pose ----------
 const _hip = new THREE.Vector3(), _tgt = new THREE.Vector3();
-const TILT_TAN = Math.tan(0.1);
+const TILT_C = Math.cos(0.1), TILT_S = Math.sin(0.1), ANK_W = DIM.ANK * TILT_C;
 
 // cloth: pure function of u (lagged samples of the drive signals), written straight into the chain
-const CLOTH_DEF = { ripple: 0, curlZ: 0, zGain: 0, base: 0.0, baseZ: 0, curl: 0.05, gain: 0.012, lag: 0.045, flut: 0.12, flutF: 10, twistGain: 0.08, hipGain: 0.01, phase: 0, sX: 0, sZ: 0, sFlut: 0.25, sway: 0 };
+const CLOTH_DEF = { droop: 0, ripple: 0, curlZ: 0, zGain: 0, base: 0.0, baseZ: 0, curl: 0.05, gain: 0.012, lag: 0.045, flut: 0.12, flutF: 10, twistGain: 0.08, hipGain: 0.01, phase: 0, sX: 0, sZ: 0, sFlut: 0.25, sway: 0 };
 const cp = (o) => Object.assign({}, CLOTH_DEF, o);
 function clothApply(chain, u, P) {
   const n = chain.length;
@@ -416,12 +434,16 @@ function clothApply(chain, u, P) {
     const st = d.stream;
     // soft-limit the torso-twist drive so the whip never flicks the cloth straight up
     const vT = 4 * Math.tanh(d.vTwist / 4);
+    // travel drive by magnitude: backing off lifts the cloth off the back exactly like walking forward,
+    // instead of folding it into the body
+    const vTr = Math.abs(d.vTravel) * (d.vTravel < 0 ? 0.85 : 1.0);
     let ax = (i === 0 ? P.base + sway : P.curl)
-      + P.gain * d.vTravel * (i === 0 ? 1.0 : 0.3) * (d.vTravel < 0 ? 0.6 : 1.0)
+      + P.gain * vTr * (i === 0 ? 1.0 : 0.3)
       + P.hipGain * d.vHip
       + P.flut * Math.sin(TAU * P.flutF * u / LOOP - i * 0.9 + P.phase) * (0.4 + k) + P.ripple * Math.sin(TAU * (P.flutF + 4) * u / LOOP - i * 1.6 + P.phase) * k;
-    let az = (i === 0 ? P.baseZ : P.curlZ) + P.zGain * d.vTravel * (0.5 + 0.5 * k) - P.twistGain * vT * (0.4 + k) * 0.5
+    let az = (i === 0 ? P.baseZ : P.curlZ) + P.zGain * vTr * (0.5 + 0.5 * k) - P.twistGain * vT * (0.4 + k) * 0.5
       + P.flut * 0.6 * Math.sin(TAU * (P.flutF - 3) * u / LOOP - i * 0.7 + P.phase * 1.7) + P.ripple * Math.sin(TAU * P.flutF * u / LOOP - i * 1.3 + P.phase * 2.3) * (0.3 + k);
+    if (i > 0) az += P.droop * k * k * (1 - 0.8 * st);   // tip segments fall back toward vertical
     if (st > 0) {
       // flag streaming during the strike/hold (lagged per segment so it unrolls)
       const wave = Math.sin(TAU * 24 * u / LOOP - i * 1.25 + P.phase);
@@ -435,18 +457,18 @@ function clothApply(chain, u, P) {
 }
 
 const CP = {
-  scarf: cp({ ripple: 0.14, curlZ: 0.1, base: 0.22, baseZ: -0.2, curl: 0.03, gain: 0.005, zGain: -0.006, lag: 0.05, flut: 0.18, flutF: 12, twistGain: 0.1, hipGain: 0.003, sX: 0.45, sZ: -1.15, sFlut: 0.3, sway: 0.12 }),
+  scarf: cp({ droop: 0.5, ripple: 0.06, curlZ: 0.0, base: 1.4, baseZ: -1.4, curl: -0.1, gain: 0.006, zGain: -0.008, lag: 0.05, flut: 0.06, flutF: 12, twistGain: 0.1, hipGain: 0.003, sX: -0.9, sZ: -0.6, sFlut: 0.3, sway: 0.12 }),
   scarf2: cp({ ripple: 0.13, curlZ: 0.08, base: 0.3, baseZ: -0.2, curl: 0.02, gain: 0.0045, zGain: -0.005, lag: 0.055, flut: 0.17, flutF: 13, twistGain: 0.08, phase: 1.3, sX: 0.4, sZ: -1.0, sFlut: 0.28, sway: 0.12 }),
   mantle: cp({ ripple: 0.08, curlZ: 0.04, base: 0.22, baseZ: -0.3, curl: 0.04, gain: 0.0045, zGain: -0.004, lag: 0.05, flut: 0.08, flutF: 9, twistGain: 0.08, hipGain: 0.005, phase: 2.6, sX: 0.26, sZ: -0.1, sFlut: 0.22, sway: 0.06 }),
   sashA: cp({ base: 0.1, baseZ: 0.1, curl: 0.04, gain: 0.01, lag: 0.04, flut: 0.09, flutF: 9, twistGain: 0.1, phase: 0.4, sX: 0.5, sZ: -0.2 }),
   flapF: cp({ base: -0.1, curl: -0.02, gain: 0.006, lag: 0.04, flut: 0.05, flutF: 8, twistGain: 0.04, phase: 0.9, sX: 0.25 }),
   hipR: cp({ base: 0.05, baseZ: -0.12, curl: 0.03, gain: 0.006, lag: 0.045, flut: 0.05, flutF: 10, twistGain: 0.05, phase: 2.9 }),
-  tailL: cp({ base: 0.22, baseZ: 0.08, curl: 0.06, gain: 0.012, lag: 0.05, flut: 0.08, flutF: 9, twistGain: 0.08, phase: 3.0, sX: 0.45, sway: 0.05 }),
-  tailR: cp({ base: 0.25, baseZ: -0.08, curl: 0.06, gain: 0.012, lag: 0.055, flut: 0.08, flutF: 10, twistGain: 0.08, phase: 4.1, sX: 0.45, sway: 0.05 }),
+  tailL: cp({ base: 0.22, baseZ: 0.32, curl: 0.06, gain: 0.012, lag: 0.05, flut: 0.08, flutF: 9, twistGain: 0.08, phase: 3.0, sX: 0.45, sway: 0.05 }),
+  tailR: cp({ base: 0.25, baseZ: -0.32, curl: 0.06, gain: 0.012, lag: 0.055, flut: 0.08, flutF: 10, twistGain: 0.08, phase: 4.1, sX: 0.45, sway: 0.05 }),
 };
 
 const _p = {};
-const LEGS = ['l', 'r'].map((sd) => ({ sx: sd === 'l' ? 1 : -1, fx: sd + 'Fx', fz: sd + 'Fz', lift: sd + 'Lift', toe: sd + 'Toe', thigh: sd + 'Thigh', shin: sd + 'Shin', boot: sd + 'Boot' }));
+const LEGS = ['l', 'r'].map((sd) => ({ sx: sd === 'l' ? 1 : -1, fx: sd + 'Fx', fz: sd + 'Fz', lift: sd + 'Lift', toe: sd + 'Toe', sw: sd + 'Sw', fy: sd + 'Fy', thigh: sd + 'Thigh', shin: sd + 'Shin', boot: sd + 'Boot' }));
 // applyPose(R, u, {cloth, snap}): snap(x) returns the pixel-snapped root x. The planted feet are
 // counter-shifted by the snap offset so they stay fixed in the world while the body snaps.
 export function applyPose(R, u, { cloth = true, snap = null } = {}) {
@@ -469,16 +491,23 @@ export function applyPose(R, u, { cloth = true, snap = null } = {}) {
     _hip.set(L.sx * DIM.HX, DIM.HIP + p.hipY, 0);
     _hip.y += L.sx * DIM.HX * Math.sin(p.pRoll);
     const fx = p[L.fx] - dxw * cy, fz = p[L.fz] - dxw * sy;
-    // compensate the body tilt so planted feet stay on the floor line wherever they are in depth
-    _tgt.set(fx, DIM.ANK + p[L.lift] + fz * TILT_TAN, fz);
-    solveLeg(R[L.thigh], R[L.shin], R[L.boot], _hip, _tgt, p[L.toe]);
-    R[L.thigh].rotation.z -= p.pRoll;
+    // root-local ankle target (fx, floor height + lift, fz) mapped exactly into the tilted body frame,
+    // so planted feet stay fixed in the world wherever they are in depth
+    const wy = ANK_W + p[L.lift];
+    _tgt.set(fx, wy * TILT_C + fz * TILT_S, -wy * TILT_S + fz * TILT_C);
+    solveLeg(R[L.thigh], R[L.shin], R[L.boot], _hip, _tgt, p[L.toe], -L.sx * p[L.sw], p[L.fy], p.pRoll);
   }
 
+  // breathing that reads at sprite size: ~1 px shoulder rise, the pauldrons lift a little more on the inhale
+  const inh = p.breathPhase * p.breath;
+  R.lArm.position.y = 11.5 + 0.3 * inh;
+  R.rArm.position.y = 11.5 + 0.3 * inh;
+  R.pl.position.y = 1.2 + 0.5 * Math.max(0, inh);
+  R.pr.position.y = 1.4 + 0.45 * Math.max(0, inh);
   R.rArm.rotation.set(-p.rShF, 0, p.rShZ);
   R.rFore.rotation.set(-p.rEl, 0, 0);
   R.weapon.rotation.set(-p.rWr, 0, p.rWrZ);
-  R.lArm.rotation.set(-p.lShF, 0, p.lShZ);
+  R.lArm.rotation.set(-p.lShF, p.lShY, p.lShZ);   // lShY: twist about the upper arm (turns the elbow hinge)
   R.lFore.rotation.set(-p.lEl, 0, 0);
   R.lHand.rotation.set(-p.lWr, 0, 0);
 
