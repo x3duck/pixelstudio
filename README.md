@@ -4,11 +4,18 @@ A small Three.js demo: an original flame-headed swordsman in the visual language
 rendered as genuine pixel art and playing an 8-second seamless loop (idle → 3 steps → coil →
 whip slash → hold → recovery → back-steps → idle) in a dark teal dungeon.
 
+## Pages
+
+- `index.html` — the flame-headed swordsman (Ember Revenant).
+- `mage.html` — an earth mage in a wide stepped hat, juggling floating rocks: idle → 3 steps → gather →
+  slam the rocks into the floor (debris, dust, ground wave) → summon them back out of the floor → back-steps.
+  Work in progress: built procedurally like the swordsman; a sprite-based version may replace it.
+
 ## Run
 
 ```sh
 npm install
-npm run dev        # open the printed URL (http://localhost:5173/)
+npm run dev        # open the printed URL (http://localhost:5173/ or /mage.html)
 npm run build      # static build in dist/
 ```
 
