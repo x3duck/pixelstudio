@@ -103,11 +103,11 @@ function toon(id, base, opt = {}) {
 const M = {
   coat: toon(0, '#211c2e', { lite: '#352d4a', shade: '#141119', deep: '#0b0a10', bias: -0.14, fold: 2, foldK: 0.21 }),
   coat2: toon(1, '#3b3258', { lite: '#51467a', shade: '#241e38', deep: '#14111f', fold: 2, foldK: 0.19 }),
-  plate: toon(2, '#2e3444', { lite: '#465069', shade: '#1f2330', deep: '#121520', hi: '#7886aa', metal: true, bias: 0.34 }),
+  plate: toon(2, '#3c4560', { lite: '#5a6688', shade: '#1f2330', deep: '#121520', hi: '#7886aa', metal: true, bias: 0.34 }),
   navy: toon(3, '#222d52', { lite: '#2b3b6c', shade: '#161a28', deep: '#11131c', bias: -0.06, fold: 1, foldK: 3, occ: true }),
   navyDark: toon(4, '#161a28', { lite: '#1e2540', shade: '#11131c', deep: '#0d0f17' }),
-  metal: toon(5, '#282c39', { lite: '#465069', shade: '#161922', deep: '#0d0f15', hi: '#c9d2e8', metal: true }),
-  metalDark: toon(6, '#191c26', { lite: '#30374a', shade: '#10121a', deep: '#0a0b10', hi: '#7886aa', metal: true }),
+  metal: toon(5, '#2a3044', { lite: '#5a6688', shade: '#161922', deep: '#0d0f15', hi: '#c9d2e8', metal: true }),
+  metalDark: toon(6, '#2a3044', { lite: '#5a6688', shade: '#12141d', deep: '#0a0b10', hi: '#8d9cba', metal: true, bias: 0.16 }),
   crimson: toon(7, '#a8162a', { lite: '#d82a34', shade: '#5a0c1c', deep: '#340712' }),
   crimsonDark: toon(8, '#7c1222', { lite: '#a01c2a', shade: '#400a16', deep: '#26060f' }),
   leather: toon(9, '#211a1e', { lite: '#352a2d', shade: '#151013', deep: '#0c090b' }),
@@ -119,7 +119,7 @@ const M = {
   plum: toon(14, '#33294a', { lite: '#463a66', shade: '#1f1830', deep: '#120e1b' }),
   edge: toon(15, '#c9d2e8', { lite: '#dde2ec', shade: '#c9d2e8', deep: '#a9b1c2', noHead: true }),
   bone: toon(16, '#b4ae9f', { lite: '#d9d3c3', shade: '#7c776f', deep: '#4a4646' }),
-  gaunt: toon(18, '#1f2330', { lite: '#2c3242', shade: '#151821', deep: '#0d0f15', hi: '#7886aa', metal: true }),
+  gaunt: toon(18, '#2a3044', { lite: '#5a6688', bias: 0.14, shade: '#151821', deep: '#0d0f15', hi: '#7886aa', metal: true }),
   ridge: toon(17, '#4b5370', { lite: '#64708f', shade: '#343a4c', deep: '#232836', metal: true }),
 };
 
@@ -497,7 +497,7 @@ function clothApply(chain, u, P) {
 }
 
 const CP = {
-  scarf: cp({ droop: 0.5, ripple: 0.06, curlZ: 0.0, base: 1.4, baseZ: -1.55, curl: -0.1, gain: 0.006, zGain: -0.008, lag: 0.05, flut: 0.11, flutF: 12, twistGain: 0.1, hipGain: 0.02, sX: -0.9, sZ: -0.6, sFlut: 0.3, sway: 0.22 }),
+  scarf: cp({ droop: 0.3, ripple: 0.06, curlZ: 0.0, base: 1.4, baseZ: -1.55, curl: -0.1, gain: 0.006, zGain: -0.008, lag: 0.05, flut: 0.11, flutF: 12, twistGain: 0.1, hipGain: 0.02, sX: -0.9, sZ: -0.6, sFlut: 0.3, sway: 0.22 }),
   scarf2: cp({ ripple: 0.13, curlZ: 0.08, base: 0.3, baseZ: -0.2, curl: 0.02, gain: 0.0045, zGain: -0.005, lag: 0.055, flut: 0.17, flutF: 13, twistGain: 0.08, phase: 1.3, sX: 0.4, sZ: -1.0, sFlut: 0.28, sway: 0.12 }),
   mantle: cp({ droop: 0.45, ripple: 0.18, curlZ: 0.04, base: 0.22, baseZ: -0.3, curl: 0.04, gain: 0.0045, zGain: -0.004, lag: 0.05, flut: 0.08, flutF: 9, twistGain: 0.08, hipGain: 0.005, phase: 2.6, sX: 0.26, sZ: -0.1, sFlut: 0.22, sway: 0.06, sAz: [-0.3, 0.35] }),
   sashA: cp({ base: 0.1, baseZ: 0.1, curl: 0.04, gain: 0.01, lag: 0.04, flut: 0.09, flutF: 9, twistGain: 0.1, phase: 0.4, sX: 0.5, sZ: -0.2 }),

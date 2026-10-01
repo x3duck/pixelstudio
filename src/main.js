@@ -64,10 +64,10 @@ const trailMat = new THREE.ShaderMaterial({
     varying float vA; varying float vS; varying float vK;
     void main(){
       if (vA < 0.2) discard;   // hard edge, no dither
-      // steps down by age: gold head -> orange -> crimson -> #5a0c1a tail
-      vec3 c = vK < 0.018 ? vec3(1.0, 0.76, 0.37) : vK < 0.04 ? vec3(1.0, 0.45, 0.2) : vK < 0.065 ? vec3(0.67, 0.12, 0.16) : vec3(0.353, 0.047, 0.102);
+      // steps down by age: gold head -> orange -> crimson -> dark-crimson tail
+      vec3 c = vK < 0.026 ? vec3(1.0, 0.76, 0.37) : vK < 0.05 ? vec3(1.0, 0.45, 0.2) : vK < 0.08 ? vec3(0.80, 0.14, 0.15) : vec3(0.54, 0.10, 0.14);
       // white only on the 1 px outer edge of the newest samples (and the leading edge on the impact frames)
-      if (vK < 0.02 && vS > 0.72) c = vec3(1.0, 0.97, 0.88);
+      if (vK < 0.012 && vS > 0.8) c = vec3(1.0, 0.97, 0.88);
       if (uFlash > 0.5 && vK < 0.012) c = vS > 0.5 ? vec3(1.0, 0.97, 0.88) : vec3(1.0, 0.89, 0.6);
       gl_FragColor = vec4(c, 1.0);
     }`,
@@ -222,7 +222,7 @@ function render(t) {
   // tapering to a point at the tail
   const PR0 = 0.25;
   const prHead = trailOn ? Math.min(swingProgress(u), 1) : 1;
-  const thickHead = 5.0 * wpp;
+  const thickHead = 7.5 * wpp;
   for (let k = 0; k < TRAIL_N; k++) {
     const age = k * TRAIL_DT;
     const pr = trailOn ? swingProgress(u - age) : 0;
@@ -233,7 +233,9 @@ function render(t) {
     const th = a0 + (a1 - a0) * pr;
     const r = (r0 + (r1 - r0) * pr) * (1 + 0.05 * Math.sin(Math.PI * pr));
     const rel = THREE.MathUtils.clamp((pr - PR0) / Math.max(1e-3, prHead - PR0), 0, 1);
-    const ro = r * 1.04, ri = ro - thickHead * Math.pow(rel, 0.45);
+    // newest samples reach in toward the fist as a filled wedge, so hand and arc read as one swing
+    const wedge = THREE.MathUtils.smoothstep(rel, 0.86, 1.0) * (1 - THREE.MathUtils.smoothstep(age, 0.0, 0.017)) * THREE.MathUtils.smoothstep(prHead, 0.55, 0.75);
+    const ro = r * 1.04, ri = Math.min(ro - thickHead * Math.pow(rel, 0.6), ro * (1 - 0.5 * wedge));
     const c = Math.cos(th), sn = Math.sin(th), pv = pivW[k];
     const o6 = k * 6;
     tPos[o6] = pv.x + c * ro; tPos[o6 + 1] = pv.y + sn * ro; tPos[o6 + 2] = 0;

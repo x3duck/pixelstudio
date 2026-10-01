@@ -74,10 +74,10 @@ const SLASH = P({
   yaw: YAW_ACT - 0.08, travel: FWD + LUNGE, hipY: -9, tPitch: 0.22, tYaw: 0.12, tRoll: -0.08, pRoll: 0,
   lFz: 15, lFx: 8, rFz: -13, rFx: -8, lToe: 0, rToe: 0.25, lSw: 0.3, rSw: 0.3, lFy: 0, rFy: -0.3,
   rShF: 0.87, rShZ: 0.8, rEl: 0.18, rWr: -1.88, rWrZ: -1.0,
-  lShF: -0.35, lShY: 0.2, lShZ: 0.5, lEl: 0.95, breath: 0.2, cam: 1, stream: 1,
+  lShF: -0.95, lShY: 0.5, lShZ: 1.15, lEl: 0.6, breath: 0.2, cam: 1, stream: 1,
 });
 // Follow-through hold: blade forward-down (about 30 deg below horizontal), tip clear of the front boot.
-const FOLLOW = P(Object.assign({}, SLASH, { hipY: -10, tPitch: 0.25, tYaw: 0.10, rShF: 0.6, rShZ: 1.2, rEl: -0.1, rWr: -1.57, rWrZ: -1.0, lShF: -0.4, lEl: 1.05, cam: 0, stream: 1 }));
+const FOLLOW = P(Object.assign({}, SLASH, { hipY: -10, tPitch: 0.25, tYaw: 0.10, rShF: 0.6, rShZ: 1.2, rEl: -0.1, rWr: -1.57, rWrZ: -1.0, lShF: -1.0, lShZ: 1.15, lEl: 0.7, cam: 0, stream: 1 }));
 const RECOVER = P({
   yaw: YAW_ACT - 0.05, travel: FWD + 5, hipY: -4, tPitch: 0.15, tYaw: 0.15, tRoll: 0.04, pRoll: -0.03,
   lFz: 9, lFx: 8, rFz: -8, rFx: -7.5, lSw: 0.45, rSw: 0.4, rFy: -0.3,

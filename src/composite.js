@@ -24,6 +24,8 @@ const PALETTE = [
   '11131c', '161a28', '222d52', '2b3b6c', '1a1d27', '2a2f3d', '3b4254', '241e38', '3b3258', '51467a',
   // blade + glints
   '5d6a8a', 'c9d2e8', '7886aa', '465069', '2e3444', '1f2330', '2c3242', '30374a',
+  // lifted armour lit planes (cool slate mid-tier)
+  '5a6688', '4c5676', '3c4560', '2a3044',
 ];
 
 export function paletteGLSL() {
@@ -189,10 +191,10 @@ float flameField(vec2 q, out float Fb){
   // irregular lower mass: radius modulated by stepped angular noise (never a clean orb)
   vec2 bq = vec2(q.x - ce.x, y - ce.y);
   float ang = atan(bq.y, bq.x);
-  float rmod = 0.84 + 0.3 * vnoise(vec2(ang * 2.2 + 7.0, tf * 4.0));
+  float rmod = 0.8 + 0.42 * vnoise(vec2(ang * 3.4 + 7.0, tf * 4.0));
   // narrower toward the base so the fire rises out of the neck opening
-  float waist = mix(0.55, 1.0, smoothstep(ce.y - 7.5, ce.y - 0.5, y));
-  float blob = 1.0 - length(vec2(bq.x / (8.4 * waist), bq.y / (bq.y > 0.0 ? 10.5 : 7.6))) / rmod;
+  float waist = mix(0.44, 1.0, smoothstep(ce.y - 7.0, ce.y - 0.5, y));
+  float blob = 1.0 - length(vec2(bq.x / (8.4 * waist), bq.y / (bq.y > 0.0 ? 10.5 : 6.4))) / rmod;
   float colW = mix(7.5, 0.6, pow(hy, 0.75)) * mix(0.6, 1.0, smoothstep(ce.y - 7.0, ce.y, y));
   float column = (y > ce.y - 2.0 && y < H + 8.0) ? (1.0 - abs(x) / colW) * (1.0 - hy * 0.9) : -1.0;
   // tongues: thin flickering spikes
@@ -258,14 +260,14 @@ vec4 flame(vec2 pix, out float F){
   float hy = clamp((q.y / 1.2 - 4.0) / 27.0, 0.0, 1.0);
   // white-hot core: a hard, irregular 4x5 px cluster whose shape flickers on the 12 fps step,
   // skewed toward the tip of the current main tongue
-  vec2 cc = floor(uHead + vec2(ce.x * 1.1 + uFace * 1.5, ce.y * 1.2 + 2.0));
+  vec2 cc = floor(uHead + vec2(ce.x * 1.1 + uFace * 1.5, ce.y * 1.2 + 4.0));
   vec2 g = floor(pix) - cc;
   float cs = coreIn(g);
   if (cs > 0.5) {
     float nIn = coreIn(g + vec2(1, 0)) * coreIn(g - vec2(1, 0)) * coreIn(g + vec2(0, 1)) * coreIn(g - vec2(0, 1));
     return nIn > 0.5 ? vec4(1.0, 0.97, 0.88, 1.0) : vec4(1.0, 0.89, 0.6, 1.0);
   }
-  if (F > 0.0 && coreIn(g + vec2(1, 0)) + coreIn(g - vec2(1, 0)) + coreIn(g + vec2(0, 1)) + coreIn(g - vec2(0, 1)) > 0.5) return vec4(1.0, 0.76, 0.37, 1.0);
+  if (F > 0.0 && coreIn(g + vec2(1, 0)) + coreIn(g - vec2(1, 0)) + coreIn(g + vec2(0, 1)) + coreIn(g - vec2(0, 1)) > 0.5) return vec4(1.0, 0.62, 0.26, 1.0);
   if (F <= 0.0) {
     // detached tongue clusters: 2-4 px licks that peel off the top, drift 4-8 px up and die (stepped, pure in u)
     for (int i = 0; i < 3; i++) {
@@ -286,13 +288,13 @@ vec4 flame(vec2 pix, out float F){
     }
     return vec4(0.0);
   }
-  // gold-white core, orange shell, crimson then dark-crimson outer wisps (no pure red-orange body)
+  // white-hot core, orange shell, red-orange body, crimson then dark-crimson outer wisps
   vec3 c;
-  if (Fb > 0.6) c = vec3(1.0, 0.61, 0.27);
-  else if (Fb > 0.4) c = vec3(1.0, 0.45, 0.2);
-  else if (Fb > 0.2) c = vec3(0.67, 0.12, 0.16);
-  else c = vec3(0.37, 0.06, 0.11);
-  if (hy > 0.75 && Fb < 0.35) c = vec3(0.235, 0.043, 0.082);
+  if (Fb > 0.66) c = vec3(1.0, 0.46, 0.2);
+  else if (Fb > 0.44) c = vec3(0.94, 0.31, 0.17);
+  else if (Fb > 0.2) c = vec3(0.80, 0.14, 0.15);
+  else c = vec3(0.50, 0.06, 0.10);
+  if (hy > 0.75 && Fb < 0.35) c = vec3(0.37, 0.04, 0.09);
   return vec4(c, 1.0);
 }
 
@@ -409,7 +411,7 @@ bool hotAt(ivec2 p){
   vec4 t = texelFetch(tChar, cl(p), 0);
   if (t.a < 0.05) return false;
   float id = idOf(floor(t.a * 64.0 + 0.5) - 4.0);
-  return isMetal(id) && id != 11.0 && id != 15.0 && id != 17.0 && t.b > 0.45;
+  return isMetal(id) && id != 11.0 && id != 15.0 && id != 17.0 && t.b > 0.6;
 }
 bool topEdge(ivec2 p, float id){ return idAt(p) == id && maskAt(p + ivec2(0, 1)) < 0.5; }
 
