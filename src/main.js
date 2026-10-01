@@ -7,15 +7,18 @@ THREE.ColorManagement.enabled = false;
 window.__LOOP = LOOP;
 
 // ---------- config ----------
-const BASE_H = 180;           // target internal height (art px); the integer scale keeps it within ~160-200
+const BASE_H = 180;           // target internal height (art px)
+const MIN_H = 150;            // the integer scale never drops the internal height below this (one art px = one world unit)
 const MIN_W = 200;            // minimum internal width (narrow / portrait windows trade scale for width)
 const VIEW_H = 180;           // nominal vertical world extent
 const FLOOR_BOTTOM = -30;     // world y at bottom of view
 const CAM_X = -6;             // world x at view centre
 
 const params = new URLSearchParams(location.search);
-const ZOOM_Y = parseFloat(params.get('zy') || '32');   // debug inspection: ?zoom=N&zy=px
-const frozenT = params.has('t') ? parseFloat(params.get('t')) : null;
+const ZOOM = Math.max(1, parseFloat(params.get('zoom')) || 1);   // inspection aid: ?zoom=N&zy=px magnifies the sprite
+const ZOOM_Y = parseFloat(params.get('zy')) || 32;
+const tParam = parseFloat(params.get('t'));
+const frozenT = params.has('t') && Number.isFinite(tParam) ? tParam : null;
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(1);
@@ -86,7 +89,7 @@ function makeTargets() {
   rtChar.depthTexture = new THREE.DepthTexture(lowW, lowH);
   rtChar.depthTexture.type = THREE.UnsignedIntType;
   rtChar.depthTexture.minFilter = THREE.NearestFilter; rtChar.depthTexture.magFilter = THREE.NearestFilter;
-  rtFx = new THREE.WebGLRenderTarget(lowW, lowH, opts);
+  rtFx = new THREE.WebGLRenderTarget(lowW, lowH, { ...opts, depthBuffer: false });
   rtFinal = new THREE.WebGLRenderTarget(lowW, lowH, { ...opts, depthBuffer: false });
 }
 
@@ -111,7 +114,7 @@ const compScene = new THREE.Scene();
 compScene.add(new THREE.Mesh(quadGeo, compMat));
 const blitMat = new THREE.ShaderMaterial({
   depthTest: false, depthWrite: false,
-  uniforms: { tSrc: { value: null }, uZoom: { value: parseFloat(params.get('zoom') || '1') }, uC: { value: new THREE.Vector2(0.5, 0.5) } },
+  uniforms: { tSrc: { value: null }, uZoom: { value: ZOOM }, uC: { value: new THREE.Vector2(0.5, 0.5) } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
   fragmentShader: `uniform sampler2D tSrc; uniform float uZoom; uniform vec2 uC; varying vec2 vUv; void main(){ vec2 uv = uC + (vUv - 0.5) / uZoom; gl_FragColor = vec4(texture2D(tSrc, uv).rgb, 1.0); }`,
 });
@@ -119,22 +122,27 @@ const blitScene = new THREE.Scene();
 blitScene.add(new THREE.Mesh(quadGeo, blitMat));
 
 // ---------- resize: integer upscale, internal res grows to fill the window ----------
-// The scale is chosen from the height so the internal height stays near 180 (about 160-200) and one art pixel
-// stays one world unit at every window shape: the sides extend or crop around the action instead of the sprite
-// changing pixel density. Narrow / portrait windows lower the scale to keep >= MIN_W columns (more wall above).
+// Computed in device pixels, so every art pixel is exactly scale x scale device pixels even at fractional
+// devicePixelRatio. The scale is chosen from the height (internal height ~180, never below MIN_H), so one art pixel
+// stays one world unit and the sides extend or crop around the action instead of the sprite changing pixel
+// density. Narrow / portrait windows lower the scale to keep >= MIN_W columns (more wall above). Only tiny windows
+// (under MIN_H x MIN_W device px) fall back to more than one world unit per art pixel.
+let targetKey = '';
 function resize() {
-  const W = Math.max(1, innerWidth), H = Math.max(1, innerHeight);
-  scale = Math.max(1, Math.min(Math.round(H / BASE_H), Math.floor(W / MIN_W)));
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(1, Math.round(innerWidth * dpr)), H = Math.max(1, Math.round(innerHeight * dpr));
+  scale = Math.max(1, Math.min(Math.round(H / BASE_H), Math.floor(H / MIN_H), Math.floor(W / MIN_W)));
   lowW = Math.ceil(W / scale);
   lowH = Math.ceil(H / scale);
-  wpp = lowW < MIN_W ? MIN_W / lowW : (lowH < 150 ? VIEW_H / lowH : 1);
+  wpp = Math.max(1, MIN_W / lowW, lowH < MIN_H ? VIEW_H / lowH : 1);
   const cw = lowW * scale, ch = lowH * scale;
   renderer.setSize(cw, ch, false);
-  canvas.style.width = cw + 'px';
-  canvas.style.height = ch + 'px';
-  canvas.style.left = Math.floor((W - cw) / 2) + 'px';
-  canvas.style.top = Math.floor((H - ch) / 2) + 'px';
-  makeTargets();
+  canvas.style.width = cw / dpr + 'px';
+  canvas.style.height = ch / dpr + 'px';
+  canvas.style.left = Math.floor((W - cw) / 2) / dpr + 'px';
+  canvas.style.top = Math.floor((H - ch) / 2) / dpr + 'px';
+  const key = lowW + 'x' + lowH;
+  if (key !== targetKey) { targetKey = key; makeTargets(); }
 }
 
 // ---------- per-frame ----------
@@ -152,7 +160,7 @@ const _sh = new THREE.Vector3(), _tp = new THREE.Vector3();
 const SLASH_KEY_T = 3.60;
 const histPx = Array.from({ length: 12 }, () => new THREE.Vector2());
 
-function setCamera(u, shake) {
+function setCamera(shake) {
   const halfW = Math.floor(lowW / 2) * wpp;
   const left = CAM_X - halfW + shake * wpp;
   cam.left = 0; cam.right = lowW * wpp;
@@ -175,11 +183,12 @@ const lagPx = new THREE.Vector2(), headPx = new THREE.Vector2();
 const _sa = new THREE.Vector2(), _sb = new THREE.Vector2(), _g = new THREE.Vector2();
 const p0 = {};
 
+let trailWasOn = true;
 function render(t) {
   const u = wrap(t);
   pose(u, p0);
   const shake = p0.cam > 0.5 ? 1 : 0;
-  setCamera(u, shake);
+  setCamera(shake);
 
   // history samples: head positions (for embers / flame drag)
   for (let k = 11; k >= 0; k--) {
@@ -233,9 +242,11 @@ function render(t) {
     const th = a0 + (a1 - a0) * pr;
     const r = (r0 + (r1 - r0) * pr) * (1 + 0.05 * Math.sin(Math.PI * pr));
     const rel = THREE.MathUtils.clamp((pr - PR0) / Math.max(1e-3, prHead - PR0), 0, 1);
-    // newest samples reach in toward the fist as a filled wedge, so hand and arc read as one swing
-    const wedge = THREE.MathUtils.smoothstep(rel, 0.86, 1.0) * (1 - THREE.MathUtils.smoothstep(age, 0.0, 0.017)) * THREE.MathUtils.smoothstep(prHead, 0.55, 0.75);
-    const ro = r * 1.04, ri = Math.min(ro - thickHead * Math.pow(rel, 0.6), ro * (1 - 0.5 * wedge));
+    // one smooth crescent profile: thin tail, widening toward the head, where the newest samples fan in toward
+    // the fist as a filled blade smear so hand, blade and arc read as one swing
+    const fan = Math.pow(THREE.MathUtils.smoothstep(rel, 0.7, 1.0), 1.5) * THREE.MathUtils.smoothstep(prHead, 0.35, 0.55)
+      * (1 - THREE.MathUtils.smoothstep(u - SWING_T1, 0.0, 0.02));   // the fan collapses right after the hit
+    const ro = r * 1.04, ri = ro - thickHead * Math.pow(rel, 0.6) - Math.max(0, 0.5 * ro - thickHead) * fan;
     const c = Math.cos(th), sn = Math.sin(th), pv = pivW[k];
     const o6 = k * 6;
     tPos[o6] = pv.x + c * ro; tPos[o6 + 1] = pv.y + sn * ro; tPos[o6 + 2] = 0;
@@ -244,10 +255,13 @@ function render(t) {
     tS[k * 2] = 1; tS[k * 2 + 1] = 0;
     tK[k * 2] = age; tK[k * 2 + 1] = age;
   }
-  trailGeo.attributes.position.needsUpdate = true;
-  trailGeo.attributes.aA.needsUpdate = true;
-  trailGeo.attributes.aS.needsUpdate = true;
-  trailGeo.attributes.aK.needsUpdate = true;
+  if (trailOn || trailWasOn) {
+    trailGeo.attributes.position.needsUpdate = true;
+    trailGeo.attributes.aA.needsUpdate = true;
+    trailGeo.attributes.aS.needsUpdate = true;
+    trailGeo.attributes.aK.needsUpdate = true;
+  }
+  trailWasOn = trailOn;
   trailMat.uniforms.uFlash.value = p0.flash > 0.5 ? 1 : 0;
 
   // flame + light uniforms
@@ -266,7 +280,6 @@ function render(t) {
   U.uTf.value = Math.floor(u * 12) / 12;
   U.uHead.value.copy(headPx);
   U.uLag.value.set(THREE.MathUtils.clamp((lagPx.x - headPx.x) * 0.9 + 2.0 * p0.breathLate, -9, 9), THREE.MathUtils.clamp((lagPx.y - headPx.y) * 0.5, -5, 5));
-  U.uFace.value = 1;
   U.uFlick.value = flick;
   U.uShadowX.value = (R.root.position.x - cam.position.x) / wpp;
   for (let k = 0; k < 12; k++) U.uHist.value[k].copy(histPx[k]);
@@ -303,7 +316,12 @@ function render(t) {
 }
 
 resize();
-addEventListener('resize', () => { resize(); if (frozenT !== null) render(frozenT); });
+function onResize() { resize(); if (frozenT !== null) render(frozenT); }
+addEventListener('resize', onResize);
+// devicePixelRatio changes (browser zoom, moving to another monitor) don't always fire 'resize'
+(function watchDpr() {
+  matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener('change', () => { onResize(); watchDpr(); }, { once: true });
+})();
 
 if (frozenT !== null) {
   render(frozenT);

@@ -72,6 +72,14 @@ float vnoise(vec2 p){
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h12(i), h12(i + vec2(1,0)), f.x), mix(h12(i + vec2(0,1)), h12(i + vec2(1,1)), f.x), f.y);
 }
+// value noise whose lattice wraps with period P (per axis). The flame's time axes use P = k * loop length,
+// k = how many lattice cells the coordinate travels per loop, so the flame is seamless across the loop.
+float vnoiseP(vec2 p, vec2 P){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  vec2 i0 = mod(i, P), i1 = mod(i + 1.0, P);
+  return mix(mix(h12(i0), h12(vec2(i1.x, i0.y)), f.x), mix(h12(vec2(i0.x, i1.y)), h12(i1), f.x), f.y);
+}
+const float NP = 4096.0;   // 'no wrap' period for purely spatial axes
 // ---------------- background ----------------
 // large rounded, pillowed flagstones in loosely staggered rows, 1 px soft mortar
 // row boundary k: uneven heights (about +-35%)
@@ -140,7 +148,7 @@ vec3 wallColor(vec2 w, vec2 pix){
     }
   }
   // vertical gradient: darker toward the top
-  float grad = smoothstep(150.0, 10.0, w.y);
+  float grad = 1.0 - smoothstep(10.0, 150.0, w.y);
   c *= mix(0.58, 1.0, grad);
   float cx = (pix.x / uRes.x - 0.5);
   c *= 1.0 - 0.35 * pow(abs(cx) * 2.0, 2.0);
@@ -186,12 +194,12 @@ float flameField(vec2 q, out float Fb){
   // drag: tip trails the motion (lagged head position), bending more with height
   float bend = uLag.x * pow(hy, 1.4);
   float x = q.x - bend - uFace * 1.6 * hy;
-  float wob = (vnoise(vec2(y * 0.16 - tf * 6.0, tf * 3.0)) - 0.5) * 6.0 * hy;
+  float wob = (vnoiseP(vec2(y * 0.16 - tf * 6.0, tf * 3.0), vec2(6.0, 3.0) * uLoop) - 0.5) * 6.0 * hy;
   x -= wob;
   // irregular lower mass: radius modulated by stepped angular noise (never a clean orb)
   vec2 bq = vec2(q.x - ce.x, y - ce.y);
   float ang = atan(bq.y, bq.x);
-  float rmod = 0.8 + 0.42 * vnoise(vec2(ang * 3.4 + 7.0, tf * 4.0));
+  float rmod = 0.8 + 0.42 * vnoiseP(vec2(ang * 3.4 + 7.0, tf * 4.0), vec2(NP, 4.0 * uLoop));
   // narrower toward the base so the fire rises out of the neck opening
   float waist = mix(0.44, 1.0, smoothstep(ce.y - 7.0, ce.y - 0.5, y));
   float blob = 1.0 - length(vec2(bq.x / (8.4 * waist), bq.y / (bq.y > 0.0 ? 10.5 : 6.4))) / rmod;
@@ -201,10 +209,10 @@ float flameField(vec2 q, out float Fb){
   float tongues = -1.0;
   for (int i = 0; i < 3; i++) {
     float fi = float(i);
-    float tx = (fi - 1.0) * 5.0 + (vnoise(vec2(fi * 7.0, tf * 4.0)) - 0.5) * 4.0;
-    float th = 10.0 + 14.0 * vnoise(vec2(fi * 3.3 + 1.0, tf * 5.0)) + (i == 1 ? 6.0 : 0.0);
+    float tx = (fi - 1.0) * 5.0 + (vnoiseP(vec2(fi * 7.0, tf * 4.0), vec2(NP, 4.0 * uLoop)) - 0.5) * 4.0;
+    float th = 10.0 + 14.0 * vnoiseP(vec2(fi * 3.3 + 1.0, tf * 5.0), vec2(NP, 5.0 * uLoop)) + (i == 1 ? 6.0 : 0.0);
     float ty = clamp((y - 6.0) / th, 0.0, 1.0);
-    float txx = x - tx - sin(ty * 4.0 + fi * 2.1 + tf * 9.0) * 2.2 * ty;
+    float txx = x - tx - sin(ty * 4.0 + fi * 2.1 + tf * 6.2831853 * 11.0 / uLoop) * 2.2 * ty;
     float w = mix(3.0, 0.4, ty);
     float tg = (y > 6.0 && y < 6.0 + th) ? (1.0 - abs(txx) / w) : -1.0;
     tongues = max(tongues, tg * 0.9);
@@ -213,8 +221,8 @@ float flameField(vec2 q, out float Fb){
   for (int i = 0; i < 2; i++) {
     float fi = float(i);
     float sd = i == 0 ? -1.0 : 1.0;
-    float len = 3.0 + 8.0 * vnoise(vec2(fi * 5.1 + 2.0, tf * 4.5));
-    float by = 3.5 + 2.5 * vnoise(vec2(fi * 2.7 + 9.0, tf * 3.0));
+    float len = 3.0 + 8.0 * vnoiseP(vec2(fi * 5.1 + 2.0, tf * 4.5), vec2(NP, 4.5 * uLoop));
+    float by = 3.5 + 2.5 * vnoiseP(vec2(fi * 2.7 + 9.0, tf * 3.0), vec2(NP, 3.0 * uLoop));
     float t = (y - by) / len;
     float tc = clamp(t, 0.0, 1.0);
     float cx = ce.x + sd * (6.0 + 5.0 * tc - 2.5 * tc * tc) - uLag.x * 0.25 * tc;
@@ -222,18 +230,18 @@ float flameField(vec2 q, out float Fb){
     float tg = (t > 0.0 && t < 1.0) ? (1.0 - abs(q.x - cx) / w) : -1.0;
     tongues = max(tongues, tg * 0.8);
   }
-  float n1 = vnoise(vec2(x * 0.42, y * 0.3 - tf * 11.0));
-  float n = n1 * 0.6 + vnoise(vec2(x * 0.9 + 3.0, y * 0.6 - tf * 17.0)) * 0.4;
+  float n1 = vnoiseP(vec2(x * 0.42, y * 0.3 - tf * 11.0), vec2(NP, 11.0 * uLoop));
+  float n = n1 * 0.6 + vnoiseP(vec2(x * 0.9 + 3.0, y * 0.6 - tf * 17.0), vec2(NP, 17.0 * uLoop)) * 0.4;
   float base = max(max(blob * 1.25, column), tongues);
   float F = base + (n - 0.5) * 0.55;
   Fb = base + (n1 - 0.5) * 0.4;       // band field: low octave only (no single-pixel band islands)
   // 2-3 px bites cut into the base silhouette
   if (y < ce.y + 1.0) {
-    float nb = step(0.6, vnoise(vec2(q.x * 0.5 + 11.0, tf * 5.0 + 3.0)));
+    float nb = step(0.6, vnoiseP(vec2(q.x * 0.5 + 11.0, tf * 5.0 + 3.0), vec2(NP, 5.0 * uLoop)));
     F -= nb * 0.5 * clamp((ce.y + 1.0 - y) / 5.0, 0.0, 1.0);
   }
   // rare detached flame pixels above the column
-  float det = step(0.9, vnoise(vec2(x * 0.7, (y - tf * 26.0) * 0.55))) * step(H * 0.62, y) * step(y, H + 11.0) * step(abs(x), 5.0);
+  float det = step(0.9, vnoiseP(vec2(x * 0.7, (y - tf * 25.0) * 0.55), vec2(NP, 13.75 * uLoop))) * step(H * 0.62, y) * step(y, H + 11.0) * step(abs(x), 5.0);
   if (det > 0.5) { F = max(F, 0.12); Fb = min(Fb, 0.15); }
   if (length(q - vec2(0.0, 14.0)) > 36.0) F = -1.0;
   return F;
@@ -243,7 +251,7 @@ float flameField(vec2 q, out float Fb){
 float coreIn(vec2 g){
   if (g.y < -2.0 || g.y > 2.0) return 0.0;
   float fr = uTf * 12.0;
-  float skew = (g.y >= 1.0) ? floor((vnoise(vec2(7.0, uTf * 4.0)) - 0.5) * 2.6 + 0.5 + clamp(uLag.x * 0.2, -1.0, 1.0)) : 0.0;
+  float skew = (g.y >= 1.0) ? floor((vnoiseP(vec2(7.0, uTf * 4.0), vec2(NP, 4.0 * uLoop)) - 0.5) * 2.6 + 0.5 + clamp(uLag.x * 0.2, -1.0, 1.0)) : 0.0;
   float edge = (g.y == -2.0 || g.y == 2.0) ? 1.0 : 0.0;
   float l = -1.0 + edge * step(0.4, h12(vec2(g.y + 3.0, fr))) - (1.0 - edge) * step(0.8, h12(vec2(g.y + 7.0, fr)));
   float r = 2.0 - edge * step(0.35, h12(vec2(g.y + 5.0, fr))) + (1.0 - edge) * step(0.75, h12(vec2(g.y + 1.0, fr))) * step(0.0, g.y);
@@ -274,7 +282,7 @@ vec4 flame(vec2 pix, out float F){
       float fi = float(i);
       float P = uLoop / (13.0 + fi * 3.0);
       float cyc = uTf / P + fi * 0.37;
-      float ph = fract(cyc), ci = floor(cyc);
+      float ph = fract(cyc), ci = mod(floor(cyc), 13.0 + fi * 3.0);   // whole cycles per loop: seamless
       if (ph > 0.72) continue;
       float hs = h11(ci * 3.1 + fi * 5.7);
       vec2 c0 = vec2((hs - 0.5) * 9.0 + uFace * 1.5 - uLag.x * 0.5, 23.0 + 6.0 * h11(ci * 1.7 + fi));
@@ -538,7 +546,8 @@ void main(){
   // ---- flame head ----
   if (inFlame) {
     // the fire rises out of the collar opening (curved rim seen slightly from above)
-    float rimY = 2.2 + 1.4 * clamp(pow(q.x / 7.0, 2.0), 0.0, 1.0);
+    float qx = q.x / 7.0;
+    float rimY = 2.2 + 1.4 * clamp(qx * qx, 0.0, 1.0);
     bool hidden = isC > 0.5 && q.y < rimY;
     if (hidden) fl.a = 0.0;
     if (nearHead > 0.5) fl.a = 0.0;     // a nearer blade/arm draws in front of the flame

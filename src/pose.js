@@ -3,7 +3,6 @@ export const LOOP = 8.0;
 const TAU = Math.PI * 2;
 
 // Body facing (radians around Y; 0 = facing the camera, +PI/2 = facing screen right).
-export const YAW_IDLE = 0.24;
 export const YAW_ACT = 0.5;
 export const WALK_YAW = 0.86;   // travel direction (radians around Y)
 export const ROOT_SCALE = 1.12;
@@ -17,11 +16,7 @@ const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t 
 const EASE = {
   linear: (t) => t,
   inout: (t) => t * t * (3 - 2 * t),
-  in: (t) => t * t * t,
   out: (t) => 1 - Math.pow(1 - t, 3),
-  outQuart: (t) => 1 - Math.pow(1 - t, 5),
-  outBack: (t) => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); },
-  inBack: (t) => { const c = 1.4; return (c + 1) * t * t * t - c * t * t; },
 };
 
 // Channels. Angles in radians, distances in art pixels (world units).
@@ -58,15 +53,15 @@ const SWEEP = P(Object.assign({}, WALKPOSE, {
 // Coil: blade cocked up and back behind the near shoulder, clear of the flame; chest stays open to camera.
 // Off arm tucks into a compact guard fist in front of the chest.
 const ANTIC = P({
-  yaw: YAW_ACT + 0.05, travel: FWD - 2, hipY: -7, tPitch: 0.16, tYaw: -0.3, tRoll: 0.08, pRoll: 0,
+  yaw: YAW_ACT + 0.05, travel: FWD - 2, hipY: -9, tPitch: 0.16, tYaw: -0.3, tRoll: 0.08, pRoll: 0,
   lFz: 8, lFx: 8, rFz: -7, rFx: -8, lSw: 0.4, rSw: 0.35, lFy: 0, rFy: -0.3,
   rShF: 0.72, rShZ: -2.9, rEl: 0.19, rWr: -2.82, rWrZ: 0.1,
-  lShF: 1.2, lShY: -0.9, lShZ: 0.95, lEl: 1.55, breath: 0.2,
+  lShF: 0.85, lShY: -0.9, lShZ: 0.55, lEl: 1.25, breath: 0.2,
 });
 // Deeper wind-up: lean back, more twist, blade further up and back so the arc passes above the fire.
 const ANTIC2 = P(Object.assign({}, ANTIC, {
-  hipY: -10, tPitch: 0.05, tYaw: -0.5, rShF: 0.53, rShZ: -2.6, rEl: 0.58, rWr: -3.13, rWrZ: 0.1,
-  lShF: 1.25, lEl: 1.6, travel: FWD - 3, squash: 1,
+  hipY: -13, tPitch: 0.0, tYaw: -0.5, rShF: 0.53, rShZ: -2.6, rEl: 0.58, rWr: -3.13, rWrZ: 0.1,
+  lShF: 0.9, lEl: 1.3, travel: FWD - 3, squash: 1,
 }));
 // Strike: chest stays open to camera (low twist, low pitch); the reach lives in the arm and the lunge.
 // Off arm bends down and back as a counterbalance.
@@ -141,7 +136,7 @@ function footWorldAt(t, side) {
   const c = Math.cos(k.yaw), s = Math.sin(k.yaw);
   return [rx + fx * c + fz * s, rz - fx * s + fz * c];
 }
-function walkMid(w, side, from, to) {
+function walkMid(w, from, to) {
   const d = (keyPose(w.t1).travel - keyPose(w.t0).travel) * 0.08;
   return [lerp(from[0], to[0], 0.5) + d * WSX, lerp(from[1], to[1], 0.5) + d * WSZ];
 }
@@ -155,7 +150,7 @@ function buildSchedule() {
     const A = w.first, B = A === 'l' ? 'r' : 'l';
     const dt = (w.t1 - w.t0) / w.n;
     const a1 = footWorldAt(endKeyT, A), b1 = footWorldAt(endKeyT, B);
-    const am = walkMid(w, A, last(A), a1);
+    const am = walkMid(w, last(A), a1);
     const sw = 1 / 1.1; // swing completes at ~91% of the step window
     step(A, w.t0, w.t0 + dt * sw, am, h, toe);
     step(B, w.t0 + dt, w.t0 + dt * (1 + sw), b1, h, toe);
@@ -218,8 +213,15 @@ function applyWalk(o, u) {
     const env = sstep(0, 0.35, p) * (1 - sstep(n - 0.35, n, p));
     o.hipY += off;
     o.walk = env; o.walkDir = dir;
-    o.tPitch += 0.05 * dir;
-    o.breath = 0.2;
+  }
+  // walk-only posture (shallow breathing, lean into the travel), blended in and out smoothly so the
+  // torso, flame and cloth never pop at the walk boundaries
+  for (const w of WALKS) {
+    const envB = sstep(w.t0 - 0.1, w.t0 + 0.1, u) * (1 - sstep(w.t1 - 0.1, w.t1 + 0.1, u));
+    if (envB <= 0) continue;
+    if (w.dir === undefined) w.dir = Math.sign(keyPose(w.t1, _kb).travel - keyPose(w.t0, _ka).travel);
+    o.tPitch += 0.05 * w.dir * envB;
+    o.breath = lerp(o.breath, 0.2, envB);
   }
 }
 
@@ -299,8 +301,3 @@ export function drive(u) {
   return _drv;
 }
 
-// Deterministic hash noise helpers (pure functions)
-export function hash1(n) {
-  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
-  return s - Math.floor(s);
-}

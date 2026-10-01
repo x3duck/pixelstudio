@@ -234,7 +234,6 @@ export function buildCharacter() {
   const tilt = group(root, [0, 0, 0], 'tilt');
   tilt.rotation.x = 0.1;
   root.scale.setScalar(ROOT_SCALE);
-  R.tilt = tilt;
 
   // pelvis (narrow: the waist steps in clearly under the chest)
   const pelvis = group(tilt, [0, DIM.HIP, 0], 'Pelvis');
@@ -312,7 +311,7 @@ export function buildCharacter() {
   mesh(tbox(9.0, 1.4, 10.2, { tx: 1.1 }), M.dark, chest, [0, 1.6, -0.4]);
   // back plate + shoulder yoke (near-black gorget)
   mesh(tbox(13, 12, 3, { tx: 1.2 }), M.metalDark, chest, [0, 7, -5.6]);
-  R.yoke = mesh(tbox(22, 4, 10.5, { tx: 0.88 }), M.metalDark, chest, [0, 13, -0.6]);
+  mesh(tbox(22, 4, 10.5, { tx: 0.88 }), M.metalDark, chest, [0, 13, -0.6]);
 
   // collar / neck: dark flared collar the flame rises from (no warm band)
   const neck = group(chest, [0, 15, 0.5], 'Neck');
@@ -420,7 +419,6 @@ export function buildCharacter() {
   bg = flat(bg);
   mesh(bg, M.blade, weapon, [0, 0, 5.2]);
   R.bladeTip = group(weapon, [0, 0.5, 29.9], 'tip');
-  R.bladeMid = group(weapon, [0, 0, 11.4], 'mid');
   R.bladeEdge = group(weapon, [0, -1.5, 22.0], 'edge');
 
   root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
