@@ -11,6 +11,16 @@ whip slash → hold → recovery → back-steps → idle) in a dark teal dungeon
   slam the rocks into the floor (debris, dust, ground wave) → summon them back out of the floor → back-steps.
   Work in progress: built procedurally like the swordsman; a sprite-based version may replace it.
 
+## Earth mage sprite (assets/earth-mage)
+
+- `earth_mage_55x84.png` — the mage as true 1:1 pixel art (55×84, 28 colours, transparent), recovered from an
+  upscaled source by snapping to its ~15 px grid.
+- `idle_sheet.png` — 24-frame breathing cycle (1x, transparent): the torso drops 1 px, the head follows a frame
+  later, the hat two frames later, the magic hand holds steady. Whole-pixel moves only, no rotation.
+- `idle.mp4` — 1920×1080, 8× nearest upscale, 6 s seamless loop (3 breaths, one blink).
+
+Regenerate with `python3 tools/mage_idle.py` (needs Python 3 with numpy + Pillow, and ffmpeg with libx264).
+
 ## Run
 
 ```sh
