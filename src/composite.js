@@ -20,6 +20,10 @@ const PALETTE = [
   '2e1a20', '442328', '5e2d2c', '7a3a30',
   // leather
   '2a2026', '3f3139',
+  // two-tier armour / cloth values (near-black trouser shadow, saturated navy lit, lifted muted purple)
+  '11131c', '161a28', '222d52', '2b3b6c', '1a1d27', '2a2f3d', '3b4254', '241e38', '3b3258', '51467a',
+  // blade + glints
+  '5d6a8a', 'c9d2e8', '7886aa', '465069', '2e3444', '1f2330', '2c3242', '30374a',
 ];
 
 export function paletteGLSL() {
@@ -55,6 +59,7 @@ uniform float uHeadDepth; // depth-buffer value of the flame (for blade-in-front
 uniform vec4 uSpark;      // impact spark origin px (xy), age s (z), active (w)
 uniform vec2 uSparkDir;   // direction of the blade tip at impact
 uniform vec3 uGlint;      // coil glint px (xy) + intensity (z)
+uniform vec2 uBladeN;     // screen-space unit normal of the blade pointing to its light (upper) edge
 varying vec2 vUv;
 
 ${paletteGLSL()}
@@ -118,14 +123,18 @@ vec3 wallColor(vec2 w, vec2 pix){
     else if (dn > -1.0 * m || rt > -1.0 * m) c = stone * 0.88; // shaded bottom/right lip
   } else {
     if (e < -7.0 * m) c = stone * 1.03;                    // slightly raised centre
-    // 1 px hairline crack on ~15% of the stones
-    if (h12(id + 7.7) > 0.85) {
-      float ca = h12(id + 1.9) * 3.14159;
-      vec2 cdir = vec2(cos(ca), sin(ca));
-      vec2 lp = info.xy - (vec2(h12(id + 4.4), h12(id + 6.6)) - 0.5) * info.zw;
-      float along = dot(lp, cdir), across = dot(lp, vec2(-cdir.y, cdir.x));
-      across += (h12(vec2(floor(along / 3.0), id.x)) - 0.5) * 1.2;
-      if (abs(across) < 0.5 * m && abs(along) < 0.35 * info.z) c = stone * 0.8;
+    // short axis-aligned hairline crack (2+ px runs with one jog, lighter lip on the lit side) on ~6% of the
+    // stones, never on the bottom row behind the boots
+    if (h12(id + 7.7) > 0.94 && (w.y - info.y) > 24.0) {
+      vec2 lp = (info.xy - (vec2(h12(id + 4.4), h12(id + 6.6)) - 0.5) * info.zw * 0.8) / m;
+      bool horiz = h12(id + 1.9) > 0.4;
+      float L = 3.0 + 3.0 * h12(id + 2.9);
+      float along = horiz ? lp.x : lp.y, across = horiz ? lp.y : -lp.x;
+      float acr = floor(across) - (along > 0.0 ? 1.0 : 0.0);
+      if (abs(along) < L) {
+        if (acr == 0.0) c = stone * 0.72;
+        else if (acr == 1.0) c = stone * 1.12;
+      }
     }
   }
   // vertical gradient: darker toward the top
@@ -165,7 +174,7 @@ vec3 floorColor(vec2 w){
 const vec2 CE = vec2(0.8, 9.0);   // core mass centre (x scaled by uFace)
 
 // flame density field around the base (q = px relative to the flame base)
-float flameField(vec2 q){
+float flameField(vec2 q, out float Fb){
   q /= vec2(1.1, 1.2);
   float tf = uTf;
   float H = 27.0;
@@ -211,8 +220,11 @@ float flameField(vec2 q){
     float tg = (t > 0.0 && t < 1.0) ? (1.0 - abs(q.x - cx) / w) : -1.0;
     tongues = max(tongues, tg * 0.8);
   }
-  float n = vnoise(vec2(x * 0.42, y * 0.3 - tf * 11.0)) * 0.6 + vnoise(vec2(x * 0.9 + 3.0, y * 0.6 - tf * 17.0)) * 0.4;
-  float F = max(max(blob * 1.25, column), tongues) + (n - 0.5) * 0.55;
+  float n1 = vnoise(vec2(x * 0.42, y * 0.3 - tf * 11.0));
+  float n = n1 * 0.6 + vnoise(vec2(x * 0.9 + 3.0, y * 0.6 - tf * 17.0)) * 0.4;
+  float base = max(max(blob * 1.25, column), tongues);
+  float F = base + (n - 0.5) * 0.55;
+  Fb = base + (n1 - 0.5) * 0.4;       // band field: low octave only (no single-pixel band islands)
   // 2-3 px bites cut into the base silhouette
   if (y < ce.y + 1.0) {
     float nb = step(0.6, vnoise(vec2(q.x * 0.5 + 11.0, tf * 5.0 + 3.0)));
@@ -220,7 +232,7 @@ float flameField(vec2 q){
   }
   // rare detached flame pixels above the column
   float det = step(0.9, vnoise(vec2(x * 0.7, (y - tf * 26.0) * 0.55))) * step(H * 0.62, y) * step(y, H + 11.0) * step(abs(x), 5.0);
-  if (det > 0.5) F = max(F, 0.12);
+  if (det > 0.5) { F = max(F, 0.12); Fb = min(Fb, 0.15); }
   if (length(q - vec2(0.0, 14.0)) > 36.0) F = -1.0;
   return F;
 }
@@ -240,7 +252,8 @@ float coreIn(vec2 g){
 // returns rgb + coverage (a); F = density (for the ring / contour)
 vec4 flame(vec2 pix, out float F){
   vec2 q = pix + 0.5 - uHead;
-  F = flameField(q);
+  float Fb;
+  F = flameField(q, Fb);
   vec2 ce = vec2(uFace * CE.x, CE.y);
   float hy = clamp((q.y / 1.2 - 4.0) / 27.0, 0.0, 1.0);
   // white-hot core: a hard, irregular 4x5 px cluster whose shape flickers on the 12 fps step,
@@ -250,16 +263,36 @@ vec4 flame(vec2 pix, out float F){
   float cs = coreIn(g);
   if (cs > 0.5) {
     float nIn = coreIn(g + vec2(1, 0)) * coreIn(g - vec2(1, 0)) * coreIn(g + vec2(0, 1)) * coreIn(g - vec2(0, 1));
-    return nIn > 0.5 ? vec4(1.0, 0.98, 0.9, 1.0) : vec4(1.0, 0.86, 0.45, 1.0);
+    return nIn > 0.5 ? vec4(1.0, 0.97, 0.88, 1.0) : vec4(1.0, 0.89, 0.6, 1.0);
   }
-  if (F > 0.0 && coreIn(g + vec2(1, 0)) + coreIn(g - vec2(1, 0)) + coreIn(g + vec2(0, 1)) + coreIn(g - vec2(0, 1)) > 0.5) return vec4(1.0, 0.62, 0.26, 1.0);
-  if (F <= 0.0) return vec4(0.0);
+  if (F > 0.0 && coreIn(g + vec2(1, 0)) + coreIn(g - vec2(1, 0)) + coreIn(g + vec2(0, 1)) + coreIn(g - vec2(0, 1)) > 0.5) return vec4(1.0, 0.76, 0.37, 1.0);
+  if (F <= 0.0) {
+    // detached tongue clusters: 2-4 px licks that peel off the top, drift 4-8 px up and die (stepped, pure in u)
+    for (int i = 0; i < 3; i++) {
+      float fi = float(i);
+      float P = uLoop / (13.0 + fi * 3.0);
+      float cyc = uTf / P + fi * 0.37;
+      float ph = fract(cyc), ci = floor(cyc);
+      if (ph > 0.72) continue;
+      float hs = h11(ci * 3.1 + fi * 5.7);
+      vec2 c0 = vec2((hs - 0.5) * 9.0 + uFace * 1.5 - uLag.x * 0.5, 23.0 + 6.0 * h11(ci * 1.7 + fi));
+      vec2 cp = c0 + vec2(sin(ph * 5.0 + fi) * 1.2 - uLag.x * 0.3 * ph, ph * (4.0 + 4.0 * h11(ci + fi * 9.1)));
+      vec2 dd = abs(floor(q) - floor(cp));
+      float rr = ph < 0.3 ? 1.0 : (ph < 0.55 ? 0.8 : 0.0);
+      if (dd.x + dd.y * 0.6 <= rr + 0.01 && dd.y < 2.5) {
+        vec3 tc = ph < 0.25 ? vec3(1.0, 0.45, 0.2) : (ph < 0.5 ? vec3(0.67, 0.12, 0.16) : vec3(0.37, 0.06, 0.11));
+        return vec4(tc, 1.0);
+      }
+    }
+    return vec4(0.0);
+  }
+  // gold-white core, orange shell, crimson then dark-crimson outer wisps (no pure red-orange body)
   vec3 c;
-  if (F > 0.62) c = vec3(1.0, 0.46, 0.2);
-  else if (F > 0.42) c = vec3(0.94, 0.31, 0.17);
-  else if (F > 0.2) c = vec3(0.80, 0.14, 0.15);
-  else c = vec3(0.50, 0.06, 0.10);
-  if (hy > 0.75 && F < 0.35) c = vec3(0.37, 0.04, 0.09);
+  if (Fb > 0.6) c = vec3(1.0, 0.61, 0.27);
+  else if (Fb > 0.4) c = vec3(1.0, 0.45, 0.2);
+  else if (Fb > 0.2) c = vec3(0.67, 0.12, 0.16);
+  else c = vec3(0.37, 0.06, 0.11);
+  if (hy > 0.75 && Fb < 0.35) c = vec3(0.235, 0.043, 0.082);
   return vec4(c, 1.0);
 }
 
@@ -291,16 +324,20 @@ vec4 embers(vec2 pix){
 }
 
 // impact sparks: a plus-star flash at the tip, then 6 short streaks bursting from it (pure in u)
+bool starIn(vec2 d){ vec2 a = abs(d); return (a.x < 0.5 && a.y < 3.5) || (a.y < 0.5 && a.x < 3.5) || (a.x < 1.5 && a.y < 1.5 && a.x + a.y < 1.5); }
 float segD(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0); return length(pa - ba * h); }
 vec4 sparks(vec2 pix){
   if (uSpark.w < 0.5) return vec4(0.0);
   vec2 p = floor(pix) + 0.5;
   float floorPy = -uOrigin.y / uWpp;
   if (p.y < floorPy) return vec4(0.0);
-  // 5 px plus-star for the first 3 frames of the hit
+  // 7x7 four-point burst 3 px beyond the blade tip (white centre, pale-yellow arms, 1 px dark-red outline),
+  // held for the first 3 frames of the hit
   if (uSpark.z < 0.05) {
-    vec2 d = abs(floor(pix) - floor(uSpark.xy));
-    if (min(d.x, d.y) < 0.5 && d.x + d.y < 2.5) return d.x + d.y < 0.5 ? vec4(1.0, 0.97, 0.88, 1.0) : vec4(1.0, 0.86, 0.45, 1.0);
+    vec2 sc = floor(uSpark.xy + uSparkDir * 3.0);
+    vec2 d = floor(pix) - sc;
+    if (starIn(d)) return (d.x == 0.0 && d.y == 0.0) ? vec4(1.0, 0.97, 0.88, 1.0) : vec4(1.0, 0.89, 0.6, 1.0);
+    if (starIn(d + vec2(1, 0)) || starIn(d - vec2(1, 0)) || starIn(d + vec2(0, 1)) || starIn(d - vec2(0, 1))) return vec4(0.37, 0.06, 0.11, 1.0);
   }
   for (int i = 0; i < 6; i++) {
     float fi = float(i);
@@ -363,9 +400,18 @@ float depthAt(ivec2 p){ return texelFetch(tDepth, cl(p), 0).r; }
 // material code written by the toon shader: a = (id*2 + up + 4) / 64
 float codeAt(ivec2 p){ return floor(texelFetch(tChar, cl(p), 0).a * 64.0 + 0.5) - 4.0; }
 float idOf(float code){ return floor(code * 0.5 + 0.01); }
-bool isMetal(float id){ return id == 2.0 || id == 5.0 || id == 6.0 || id == 11.0 || id == 15.0 || id == 17.0; }
+bool isMetal(float id){ return id == 2.0 || id == 5.0 || id == 6.0 || id == 11.0 || id == 15.0 || id == 17.0 || id == 18.0; }
 bool isCrim(float id){ return id == 7.0 || id == 8.0; }
 float fxA(ivec2 p){ return step(0.5, texelFetch(tFx, cl(p), 0).a); }
+float idAt(ivec2 p){ return maskAt(p) > 0.5 ? idOf(codeAt(p)) : -1.0; }
+// a specular 'hot' pixel on armour (bright bluish highlight colour from the toon shader)
+bool hotAt(ivec2 p){
+  vec4 t = texelFetch(tChar, cl(p), 0);
+  if (t.a < 0.05) return false;
+  float id = idOf(floor(t.a * 64.0 + 0.5) - 4.0);
+  return isMetal(id) && id != 11.0 && id != 15.0 && id != 17.0 && t.b > 0.45;
+}
+bool topEdge(ivec2 p, float id){ return idAt(p) == id && maskAt(p + ivec2(0, 1)) < 0.5; }
 
 void main(){
   ivec2 ip = ivec2(floor(vUv * uRes));
@@ -409,18 +455,48 @@ void main(){
       if (maskAt(ip + o) < 0.5) continue;
       float dn = depthAt(ip + o);
       if (d0 - dn > th) line = 1.0;
-      else if (idOf(codeAt(ip + o)) != id && dn < d0) seam = 1.0;
+      else {
+        float idn = idOf(codeAt(ip + o));
+        if (idn != id && dn < d0 && id != 15.0 && idn != 15.0) {
+          // seams only on real boundaries: the nearer part is at least 2 px thick and the boundary runs 2+ px
+          ivec2 pp = ivec2(o.y, o.x);
+          bool thick = idAt(ip + 2 * o) == idn;
+          bool run = (idAt(ip + pp + o) == idn && idAt(ip + pp) == id) || (idAt(ip - pp + o) == idn && idAt(ip - pp) == id);
+          if (thick && run) seam = 1.0;
+        }
+      }
     }
     bool metal = isMetal(id), crim = isCrim(id);
-    // rim pixels only on edge runs of 2+ px (no dashed staircases on diagonals)
-    bool runU = (maskAt(ip + ivec2(1, 0)) > 0.5 && maskAt(ip + ivec2(1, 1)) < 0.5) || (maskAt(ip + ivec2(-1, 0)) > 0.5 && maskAt(ip + ivec2(-1, 1)) < 0.5);
-    bool runR = (maskAt(ip + ivec2(0, 1)) > 0.5 && maskAt(ip + ivec2(1, 1)) < 0.5) || (maskAt(ip + ivec2(0, -1)) > 0.5 && maskAt(ip + ivec2(1, -1)) < 0.5);
-    if (mU < 0.5 && runU) {
-      if (metal) { if (up > 0.5) c = vec3(0.80, 0.84, 0.92); else c = c * 1.3 + vec3(0.03, 0.035, 0.05); }
-      else if (crim) c = vec3(0.62, 0.12, 0.15);
-      else c = c * 1.55 + vec3(0.05, 0.06, 0.08);
-    } else if (mR < 0.5 && runR && !crim) {
-      c = metal ? vec3(0.42, 0.46, 0.56) : c * 1.3 + vec3(0.04, 0.045, 0.07);
+    // specular capped to isolated single pixels; none on islands smaller than ~3x3
+    if (hotAt(ip)) {
+      bool small = idAt(ip + ivec2(1, 0)) != id || idAt(ip - ivec2(1, 0)) != id || idAt(ip + ivec2(0, 1)) != id || idAt(ip - ivec2(0, 1)) != id;
+      if (small || hotAt(ip - ivec2(1, 0)) || hotAt(ip - ivec2(0, 1))) c *= 0.42;
+    }
+    if (id == 11.0) {
+      // blade: flat mid-metal body, continuous 1 px light edge on the upper side, 1 px dark spine below
+      ivec2 bn = ivec2(floor(uBladeN + 0.5));
+      if (idAt(ip + bn) != 11.0) c = vec3(0.788, 0.824, 0.91);
+      else if (idAt(ip - bn) != 11.0) c = vec3(0.11, 0.122, 0.157);
+      else c = vec3(0.365, 0.416, 0.541);
+    } else if (id != 15.0) {
+      // rim pixels only on edge runs of 2+ px (no dashed staircases on diagonals), never on features under 2 px
+      bool runU = (maskAt(ip + ivec2(1, 0)) > 0.5 && maskAt(ip + ivec2(1, 1)) < 0.5) || (maskAt(ip + ivec2(-1, 0)) > 0.5 && maskAt(ip + ivec2(-1, 1)) < 0.5);
+      bool runR = (maskAt(ip + ivec2(0, 1)) > 0.5 && maskAt(ip + ivec2(1, 1)) < 0.5) || (maskAt(ip + ivec2(0, -1)) > 0.5 && maskAt(ip + ivec2(1, -1)) < 0.5);
+      bool thickV = idAt(ip - ivec2(0, 1)) == id;
+      bool thickH = idAt(ip - ivec2(1, 0)) == id;
+      if (mU < 0.5 && runU && thickV) {
+        if (metal) {
+          // armour: a dim rim along the run, the bright glint only at the run ends (isolated 1-2 px)
+          bool endRun = !topEdge(ip + ivec2(1, 0), id) || !topEdge(ip - ivec2(1, 0), id);
+          bool thick3 = idAt(ip - ivec2(0, 2)) == id;
+          if (up > 0.5 && endRun && thick3) c = vec3(0.47, 0.53, 0.67);
+          else c = c * 1.3 + vec3(0.03, 0.035, 0.05);
+        }
+        else if (crim) c = vec3(0.85, 0.17, 0.2);
+        else c = c * 1.55 + vec3(0.05, 0.06, 0.08);
+      } else if (mR < 0.5 && runR && thickH && !crim) {
+        c = metal ? c * 1.35 + vec3(0.03, 0.035, 0.05) : c * 1.3 + vec3(0.04, 0.045, 0.07);
+      }
     }
     if (seam > 0.5 && line < 0.5) c = c * 0.5;
     if (line > 0.5) c = mix(c, vec3(0.03, 0.03, 0.05), 0.85);
@@ -446,7 +522,11 @@ void main(){
   float Fa = fxA(ip);
   bool knock = inFlame && Fd > -0.17;
   if (!knock) {
-    if (Fa > 0.5) col = texelFetch(tFx, ip, 0).rgb;
+    if (Fa > 0.5) {
+      col = texelFetch(tFx, ip, 0).rgb;
+      // within ~6 px of the flame the smear drops one band, so a dark gap keeps the fire the brightest shape
+      if (inFlame && Fd > -0.95) col = col.r > 0.95 && col.g > 0.8 ? vec3(1.0, 0.45, 0.2) : (col.g > 0.3 ? vec3(0.67, 0.12, 0.16) : vec3(0.35, 0.05, 0.1));
+    }
     else {
       float nb = fxA(ip + ivec2(1, 0)) + fxA(ip + ivec2(-1, 0)) + fxA(ip + ivec2(0, 1)) + fxA(ip + ivec2(0, -1));
       if (nb > 0.5) col = vec3(0.37, 0.06, 0.10);

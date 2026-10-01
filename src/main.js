@@ -7,9 +7,9 @@ THREE.ColorManagement.enabled = false;
 window.__LOOP = LOOP;
 
 // ---------- config ----------
-const BASE_H = 180;           // reference internal height (art px)
-const MIN_W = 240;            // minimum internal width
-const VIEW_H = 180;           // vertical world extent (constant)
+const BASE_H = 180;           // target internal height (art px); the integer scale keeps it within ~160-200
+const MIN_W = 200;            // minimum internal width (narrow / portrait windows trade scale for width)
+const VIEW_H = 180;           // nominal vertical world extent
 const FLOOR_BOTTOM = -30;     // world y at bottom of view
 const CAM_X = -6;             // world x at view centre
 
@@ -63,12 +63,12 @@ const trailMat = new THREE.ShaderMaterial({
     uniform float uFlash;
     varying float vA; varying float vS; varying float vK;
     void main(){
-      float a = vA * smoothstep(0.0, 0.35, vS);   // fade toward the inner edge of the arc
-      if (a < 0.2) discard;   // hard edge, no dither
-      float e = a * (0.55 + 0.45 * vS);
-      vec3 c = e > 0.86 ? vec3(1.0, 0.95, 0.8) : e > 0.62 ? vec3(1.0, 0.76, 0.37) : e > 0.42 ? vec3(1.0, 0.45, 0.2) : e > 0.24 ? vec3(0.82, 0.18, 0.17) : vec3(0.53, 0.08, 0.14);
-      // impact frames: the leading edge of the arc flashes white-yellow
-      if (uFlash > 0.5 && vK < 0.02) c = vS > 0.5 ? vec3(1.0, 0.97, 0.88) : vec3(1.0, 0.89, 0.6);
+      if (vA < 0.2) discard;   // hard edge, no dither
+      // steps down by age: gold head -> orange -> crimson -> #5a0c1a tail
+      vec3 c = vK < 0.018 ? vec3(1.0, 0.76, 0.37) : vK < 0.04 ? vec3(1.0, 0.45, 0.2) : vK < 0.065 ? vec3(0.67, 0.12, 0.16) : vec3(0.353, 0.047, 0.102);
+      // white only on the 1 px outer edge of the newest samples (and the leading edge on the impact frames)
+      if (vK < 0.02 && vS > 0.72) c = vec3(1.0, 0.97, 0.88);
+      if (uFlash > 0.5 && vK < 0.012) c = vS > 0.5 ? vec3(1.0, 0.97, 0.88) : vec3(1.0, 0.89, 0.6);
       gl_FragColor = vec4(c, 1.0);
     }`,
 });
@@ -104,7 +104,7 @@ const compMat = new THREE.ShaderMaterial({
     uFlick: { value: 1 }, uShadowX: { value: 0 },
     uHist: { value: Array.from({ length: 12 }, () => new THREE.Vector2()) },
     uHeadDepth: { value: 0.5 }, uSpark: { value: new THREE.Vector4() }, uSparkDir: { value: new THREE.Vector2(1, 0) },
-    uGlint: { value: new THREE.Vector3() },
+    uGlint: { value: new THREE.Vector3() }, uBladeN: { value: new THREE.Vector2(0, 1) },
   },
 });
 const compScene = new THREE.Scene();
@@ -119,12 +119,15 @@ const blitScene = new THREE.Scene();
 blitScene.add(new THREE.Mesh(quadGeo, blitMat));
 
 // ---------- resize: integer upscale, internal res grows to fill the window ----------
+// The scale is chosen from the height so the internal height stays near 180 (about 160-200) and one art pixel
+// stays one world unit at every window shape: the sides extend or crop around the action instead of the sprite
+// changing pixel density. Narrow / portrait windows lower the scale to keep >= MIN_W columns (more wall above).
 function resize() {
   const W = Math.max(1, innerWidth), H = Math.max(1, innerHeight);
-  scale = Math.max(1, Math.min(Math.floor(H / BASE_H), Math.floor(W / MIN_W)));
+  scale = Math.max(1, Math.min(Math.round(H / BASE_H), Math.floor(W / MIN_W)));
   lowW = Math.ceil(W / scale);
   lowH = Math.ceil(H / scale);
-  wpp = VIEW_H / lowH;
+  wpp = lowW < MIN_W ? MIN_W / lowW : (lowH < 150 ? VIEW_H / lowH : 1);
   const cw = lowW * scale, ch = lowH * scale;
   renderer.setSize(cw, ch, false);
   canvas.style.width = cw + 'px';
@@ -154,7 +157,9 @@ function setCamera(u, shake) {
   const left = CAM_X - halfW + shake * wpp;
   cam.left = 0; cam.right = lowW * wpp;
   cam.bottom = 0; cam.top = lowH * wpp;
-  cam.position.set(left, FLOOR_BOTTOM - (shake ? wpp : 0), 600);
+  // keep the floor line at a stable height: extra rows mostly go to the wall above
+  const extra = THREE.MathUtils.clamp((lowH * wpp - VIEW_H) * 0.5, -12, 25);
+  cam.position.set(left, FLOOR_BOTTOM - extra - (shake ? wpp : 0), 600);
   cam.updateProjectionMatrix();
   cam.updateMatrixWorld();
 }
@@ -198,13 +203,13 @@ function render(t) {
       R.rArm.getWorldPosition(pivW[k]);
     }
   }
-  // impact sparks: origin = blade tip at the impact time, direction = tip motion
-  const SPARK_T = 3.575;
+  // impact sparks: timed from the hit, origin = the visible blade tip just after it reappears, direction = tip motion
+  const SPARK_T = 3.575, SPARK_POS_T = 3.595;
   const sparkAge = u - SPARK_T;
   const sparkOn = sparkAge >= 0 && sparkAge < 0.3;
   if (sparkOn) {
-    poseAt(SPARK_T - 0.01); toPx(R.bladeTip, _sa);
-    poseAt(SPARK_T); toPx(R.bladeTip, _sb);
+    poseAt(SPARK_POS_T - 0.012); toPx(R.bladeTip, _sa);
+    poseAt(SPARK_POS_T); toPx(R.bladeTip, _sb);
     const d = _sa.sub(_sb).negate(); if (d.lengthSq() < 1e-6) d.set(1, 0); d.normalize();
     compMat.uniforms.uSpark.value.set(_sb.x, _sb.y, sparkAge, 1);
     compMat.uniforms.uSparkDir.value.copy(d);
@@ -213,20 +218,26 @@ function render(t) {
   poseAt(u, SNAP_CLOTH);
   R.weapon.visible = !bladeHidden(u);
 
-  // trail geometry
+  // trail geometry: a ~180 degree crescent (starts 25% into the swing), ~4 px thick at the leading edge and
+  // tapering to a point at the tail
+  const PR0 = 0.25;
+  const prHead = trailOn ? Math.min(swingProgress(u), 1) : 1;
+  const thickHead = 5.0 * wpp;
   for (let k = 0; k < TRAIL_N; k++) {
     const age = k * TRAIL_DT;
     const pr = trailOn ? swingProgress(u - age) : 0;
     const ageA = 1 - THREE.MathUtils.smoothstep(age, 0.02, 0.2);
     const uk = wrap(u - age);
-    const a = pr > 0 && uk <= SWING_T1 + 0.006 ? ageA : 0;   // only samples taken while the arc sweeps
+    const a = pr > PR0 && uk <= SWING_T1 + 0.006 ? ageA : 0;   // only samples taken while the arc sweeps
     const endA = 1 - THREE.MathUtils.smoothstep(u - SWING_T1, 0.07, 0.11);   // whole arc gone ~0.1 s after the hit
     const th = a0 + (a1 - a0) * pr;
-    const r = (r0 + (r1 - r0) * pr) * (1 + 0.12 * Math.sin(Math.PI * pr));
+    const r = (r0 + (r1 - r0) * pr) * (1 + 0.05 * Math.sin(Math.PI * pr));
+    const rel = THREE.MathUtils.clamp((pr - PR0) / Math.max(1e-3, prHead - PR0), 0, 1);
+    const ro = r * 1.04, ri = ro - thickHead * Math.pow(rel, 0.45);
     const c = Math.cos(th), sn = Math.sin(th), pv = pivW[k];
     const o6 = k * 6;
-    tPos[o6] = pv.x + c * r * 1.05; tPos[o6 + 1] = pv.y + sn * r * 1.05; tPos[o6 + 2] = 0;
-    tPos[o6 + 3] = pv.x + c * r * 0.84; tPos[o6 + 4] = pv.y + sn * r * 0.84; tPos[o6 + 5] = 0;
+    tPos[o6] = pv.x + c * ro; tPos[o6 + 1] = pv.y + sn * ro; tPos[o6 + 2] = 0;
+    tPos[o6 + 3] = pv.x + c * ri; tPos[o6 + 4] = pv.y + sn * ri; tPos[o6 + 5] = 0;
     tA[k * 2] = a * endA; tA[k * 2 + 1] = a * endA;
     tS[k * 2] = 1; tS[k * 2 + 1] = 0;
     tK[k * 2] = age; tK[k * 2 + 1] = age;
@@ -242,6 +253,7 @@ function render(t) {
   headPx.set(Math.round(headPx.x), Math.round(headPx.y));
   const flick = 0.82 + 0.18 * hashf(Math.floor(u * 14));
   R.headLight.getWorldPosition(toonShared.uHeadPos.value);
+  R.pelvis.getWorldPosition(toonShared.uPelvis.value);
   toonShared.uHeadI.value = flick;
 
   const U = compMat.uniforms;
@@ -251,7 +263,7 @@ function render(t) {
   U.uTime.value = u;
   U.uTf.value = Math.floor(u * 12) / 12;
   U.uHead.value.copy(headPx);
-  U.uLag.value.set(THREE.MathUtils.clamp((lagPx.x - headPx.x) * 0.9 + 1.3 * p0.breathLate, -9, 9), THREE.MathUtils.clamp((lagPx.y - headPx.y) * 0.5, -5, 5));
+  U.uLag.value.set(THREE.MathUtils.clamp((lagPx.x - headPx.x) * 0.9 + 2.0 * p0.breathLate, -9, 9), THREE.MathUtils.clamp((lagPx.y - headPx.y) * 0.5, -5, 5));
   U.uFace.value = 1;
   U.uFlick.value = flick;
   U.uShadowX.value = (R.root.position.x - cam.position.x) / wpp;
@@ -259,6 +271,14 @@ function render(t) {
   // flame depth (blade nearer than this draws in front of the fire)
   R.head.getWorldPosition(_v); _v.project(cam);
   U.uHeadDepth.value = _v.z * 0.5 + 0.5;
+  // blade screen normal toward its upper (lit) edge, for the composite's 1 px edge / spine
+  toPx(R.weapon, _sa); toPx(R.bladeTip, _sb);
+  {
+    let dx = _sb.x - _sa.x, dy = _sb.y - _sa.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    let nx = -dy, ny = dx;
+    if (Math.abs(ny) < 0.2 ? nx > 0 : ny < 0) { nx = -nx; ny = -ny; }
+    U.uBladeN.value.set(nx, ny);
+  }
   // coil glint on the blade edge
   if (p0.coil > 0.02) { toPx(R.bladeEdge, _g); U.uGlint.value.set(_g.x, _g.y, p0.coil); }
   else U.uGlint.value.set(0, 0, 0);

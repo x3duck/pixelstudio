@@ -52,11 +52,8 @@ const WALKEND = P(Object.assign({}, WALKPOSE, { travel: FWD, lFz: 4.5, rFz: -3.5
 // rotating through the camera axis.
 const SWEEP = P(Object.assign({}, WALKPOSE, {
   yaw: YAW_ACT + 0.03, travel: FWD - 1, hipY: -5, tPitch: 0.14, tYaw: -0.12, tRoll: 0.08, lFz: 4.5, rFz: -5, rFx: -9,
-  rShF: -0.3, rShZ: -1.5, rEl: 0.93, rWr: -2.6, rWrZ: 0.15,
+  rShF: -0.31, rShZ: -2.36, rEl: 1.73, rWr: -3.32, rWrZ: 0.15,
   lShF: 0.6, lShY: -0.4, lShZ: 0.6, lEl: 1.3, breath: 0.4,
-}));
-const SWEEP2 = P(Object.assign({}, SWEEP, {
-  travel: FWD - 1.6, hipY: -6.2, tYaw: -0.22, tRoll: 0.08, rShF: 1.38, rShZ: -1.73, rEl: 0.29, rWr: -3.6, lShF: 0.95, lShY: -0.7, lShZ: 0.7, lEl: 1.6,
 }));
 // Coil: blade cocked up and back behind the near shoulder, clear of the flame; chest stays open to camera.
 // Off arm tucks into a compact guard fist in front of the chest.
@@ -64,12 +61,12 @@ const ANTIC = P({
   yaw: YAW_ACT + 0.05, travel: FWD - 2, hipY: -7, tPitch: 0.16, tYaw: -0.3, tRoll: 0.08, pRoll: 0,
   lFz: 8, lFx: 8, rFz: -7, rFx: -8, lSw: 0.4, rSw: 0.35, lFy: 0, rFy: -0.3,
   rShF: 0.72, rShZ: -2.9, rEl: 0.19, rWr: -2.82, rWrZ: 0.1,
-  lShF: 1.2, lShY: -0.9, lShZ: 0.75, lEl: 1.8, breath: 0.2,
+  lShF: 1.2, lShY: -0.9, lShZ: 0.95, lEl: 1.55, breath: 0.2,
 });
 // Deeper wind-up: lean back, more twist, blade further up and back so the arc passes above the fire.
 const ANTIC2 = P(Object.assign({}, ANTIC, {
-  hipY: -10, tPitch: 0.05, tYaw: -0.5, rShF: 0.22, rShZ: -2.64, rEl: 1.19, rWr: -3.02, rWrZ: 0.1,
-  lShF: 1.25, lEl: 1.85, travel: FWD - 3, squash: 1,
+  hipY: -10, tPitch: 0.05, tYaw: -0.5, rShF: 0.53, rShZ: -2.6, rEl: 0.58, rWr: -3.13, rWrZ: 0.1,
+  lShF: 1.25, lEl: 1.6, travel: FWD - 3, squash: 1,
 }));
 // Strike: chest stays open to camera (low twist, low pitch); the reach lives in the arm and the lunge.
 // Off arm bends down and back as a counterbalance.
@@ -87,9 +84,11 @@ const RECOVER = P({
   rShF: -0.2, rShZ: -0.45, rEl: 0.9, rWr: -2.5, rWrZ: 0.1,
   lShF: 0.2, lShZ: 0.6, lEl: 1.0, breath: 0.6, stream: 0.25,
 });
+// recovery snap: the wrist flips fast, tip swung outward, so the blade never hangs vertical like a cane
+const RECOV0 = P(Object.assign({}, FOLLOW, { hipY: -8, tPitch: 0.2, rShF: 0.1, rShZ: -0.1, rEl: 0.75, rWr: -2.68, rWrZ: 0.0, lShF: -0.1, lEl: 1.0, stream: 0.6 }));
 const IDLE_R = P({ travel: FWD + 4 });
-const BACKREADY = P(Object.assign({}, WALKPOSE, { yaw: YAW_ACT - 0.1, travel: FWD + 4, lFz: 3, rFz: -2.5 }));
-const BACKEND = P(Object.assign({}, WALKPOSE, { yaw: YAW_ACT - 0.1, travel: 0, lFz: 3, rFz: -2.5 }));
+const BACKREADY = P(Object.assign({}, WALKPOSE, { yaw: YAW_ACT - 0.1, travel: FWD + 4, lFz: 3, rFz: -2.5, lFx: 9, rFx: -8 }));
+const BACKEND = P(Object.assign({}, WALKPOSE, { yaw: YAW_ACT - 0.1, travel: 0, lFz: 3, rFz: -2.5, lFx: 9, rFx: -8 }));
 
 // [time, pose, ease used from this key to the next]
 const KEYS = [
@@ -97,13 +96,13 @@ const KEYS = [
   [1.40, IDLE, 'inout'],
   [1.65, READY, 'linear'],
   [2.95, WALKEND, 'inout'],
-  [3.08, SWEEP, 'linear'],
-  [3.17, SWEEP2, 'linear'],
+  [3.08, SWEEP, 'out'],
   [3.25, ANTIC, 'inout'],
   [3.50, ANTIC2, 'out'],
   [3.60, SLASH, 'out'],
   [3.74, FOLLOW, 'linear'],
-  [4.20, FOLLOW, 'inout'],
+  [4.20, FOLLOW, 'out'],
+  [4.30, RECOV0, 'inout'],
   [4.75, RECOVER, 'inout'],
   [5.20, IDLE_R, 'inout'],
   [5.70, IDLE_R, 'inout'],
@@ -115,8 +114,8 @@ const KEYS = [
 
 const WALKS = [
   // start, end, steps, first leg ('l'|'r')
-  { t0: 1.65, t1: 2.95, n: 3, first: 'r' },
-  { t0: 5.90, t1: 7.10, n: 3, first: 'r' },
+  { t0: 1.65, t1: 2.95, n: 3, first: 'r', bob: 4.5 },
+  { t0: 5.90, t1: 7.10, n: 3, first: 'r', bob: 5.5 },
 ];
 
 const CH = Object.keys(IDLE);
@@ -151,16 +150,16 @@ function walkMid(w, side, from, to) {
 function buildSchedule() {
   const S = { l: { start: footWorldAt(0, 'l'), steps: [] }, r: { start: footWorldAt(0, 'r'), steps: [] } };
   const last = (side) => { const st = S[side].steps; return st.length ? st[st.length - 1].to : S[side].start; };
-  const step = (side, t0, t1, to, h = 4.5) => S[side].steps.push({ t0, t1, to, h, from: last(side) });
-  const walk = (w, endKeyT) => {
+  const step = (side, t0, t1, to, h = 4.5, toe = 0.35) => S[side].steps.push({ t0, t1, to, h, toe, from: last(side) });
+  const walk = (w, endKeyT, h = 4.5, toe = 0.35) => {
     const A = w.first, B = A === 'l' ? 'r' : 'l';
     const dt = (w.t1 - w.t0) / w.n;
     const a1 = footWorldAt(endKeyT, A), b1 = footWorldAt(endKeyT, B);
     const am = walkMid(w, A, last(A), a1);
     const sw = 1 / 1.1; // swing completes at ~91% of the step window
-    step(A, w.t0, w.t0 + dt * sw, am);
-    step(B, w.t0 + dt, w.t0 + dt * (1 + sw), b1);
-    step(A, w.t0 + 2 * dt, w.t0 + dt * (2 + sw), a1);
+    step(A, w.t0, w.t0 + dt * sw, am, h, toe);
+    step(B, w.t0 + dt, w.t0 + dt * (1 + sw), b1, h, toe);
+    step(A, w.t0 + 2 * dt, w.t0 + dt * (2 + sw), a1, h, toe);
   };
   walk(WALKS[0], 2.95);
   // coil: rear foot slides back into a wide stance (low lift)
@@ -171,7 +170,7 @@ function buildSchedule() {
   step('l', 4.22, 4.55, footWorldAt(5.3, 'l'), 3.5);
   step('r', 4.55, 4.92, footWorldAt(5.3, 'r'), 3.5);
   // back steps end exactly on the idle plants (so the final turn does not slide the feet)
-  walk(WALKS[1], 7.9);
+  walk(WALKS[1], 7.9, 6.5, 0.5);
   return S;
 }
 const SCHED = buildSchedule();
@@ -189,7 +188,7 @@ function footState(side, u, st0) {
       px = lerp(st.from[0], st.to[0], e); pz = lerp(st.from[1], st.to[1], e);
       st0.lift = st.h * Math.sin(Math.PI * f);
       const dx = (st.to[0] - st.from[0]) * WSX + (st.to[1] - st.from[1]) * WSZ;
-      st0.toe = -0.35 * Math.sin(Math.PI * f) * Math.sign(dx) * Math.min(1, Math.abs(dx) / 6);
+      st0.toe = -st.toe * Math.sin(Math.PI * f) * Math.sign(dx) * Math.min(1, Math.abs(dx) / 6);
       st0.moving = 1;
     }
     break;
@@ -212,7 +211,7 @@ function applyWalk(o, u) {
     const dir = Math.sign(b.travel - a.travel);
     // bob: low at contact, high at passing (about 4 art px of travel)
     const bob = Math.pow(Math.sin(Math.PI * f), 0.8);
-    let off = -4.0 + 4.5 * bob;
+    let off = -4.0 + w.bob * bob;
     if (k === 0) off = lerp(0.3 * bob, off, sstep(0.0, 0.5, f));          // ease into the walk (no hip pop)
     if (k === n - 1) off = lerp(off, 0, sstep(0.5, 1.0, f));              // and out of it
     // how far into the walk (for blending the arm-swing posture in/out)
@@ -245,21 +244,21 @@ export function pose(uRaw, out = {}) {
     const back = o.walkDir < 0;
     const w = o.walk;
     // sword arm swings at the hip (blade kept out at the side, never across the chest)
-    const dSh = (back ? 0.36 : 0.45) * legDiff * w, dEl = 0.15 * Math.max(0, legDiff) * w;
+    const dSh = (back ? 0.6 : 0.62) * legDiff * w, dEl = 0.22 * Math.max(0, legDiff) * w;
     o.rShF += dSh;
     o.rEl += dEl;
     o.rShZ -= 0.25 * w;
-    o.rWr -= (dSh + dEl) * 0.9;     // the blade keeps hanging at the hip instead of swinging across the chest
-    o.lShF -= 1.2 * legDiff * w;
-    o.lEl += 0.5 * Math.abs(legDiff) * w;
+    o.rWr -= (dSh + dEl) * 0.45;    // the blade swings with the arm but never across the chest
+    o.lShF -= (back ? 1.5 : 1.2) * legDiff * w;
+    o.lEl += (back ? 0.65 : 0.5) * Math.abs(legDiff) * w;
     o.tYaw += 0.2 * legDiff * w;
     o.tRoll += 0.04 * (fl.lift - fr.lift) / 4.5;
     o.pRoll += 0.03 * (fr.lift - fl.lift) / 4.5;
   }
   // breathing & idle drift (4 breaths per loop, all frequencies integer per loop)
   const br = Math.sin(TAU * 4 * u / LOOP);
-  o.hipY += 0.4 * br * o.breath;
-  o.tPitch += 0.025 * br * o.breath;
+  o.hipY += 0.9 * br * o.breath;
+  o.tPitch += 0.04 * br * o.breath;
   o.rShZ -= 0.04 * br * o.breath;
   o.lShZ += 0.025 * br * o.breath;
   o.pRoll += 0.03 * Math.sin(TAU * 2 * u / LOOP + 0.7) * o.breath;
