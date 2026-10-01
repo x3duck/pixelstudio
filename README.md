@@ -19,7 +19,13 @@ whip slash → hold → recovery → back-steps → idle) in a dark teal dungeon
   later, the hat two frames later, the magic hand holds steady. Whole-pixel moves only, no rotation.
 - `idle.mp4` — 1920×1080, 8× nearest upscale, 6 s seamless loop (3 breaths, one blink).
 
-Regenerate with `python3 tools/mage_idle.py` (needs Python 3 with numpy + Pillow, and ffmpeg with libx264).
+- `run_source_8f.png` — the 8 hand-drawn run frames at 1:1 (recovered from a 4× upscale).
+- `run_sheet.png` — the cleaned 8-frame run cycle (contact, down, passing, flight × 2): one canonical
+  head + hat pasted on every frame at its eye (no hat size drift), second-row shins shortened to match,
+  grounded frames on a common baseline, flight frames lifted.
+- `run.mp4` — 1920×1080, 8× nearest upscale, 6 s seamless loop, running in place over a scrolling floor.
+
+Regenerate with `python3 tools/mage_idle.py` and `python3 tools/mage_run.py` (needs Python 3 with numpy + Pillow, and ffmpeg with libx264).
 
 ## Run
 
