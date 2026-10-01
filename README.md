@@ -7,9 +7,24 @@ whip slash → hold → recovery → back-steps → idle) in a dark teal dungeon
 ## Pages
 
 - `index.html` — the flame-headed swordsman (Ember Revenant).
+- `voxel.html` — the earth mage as a voxel puppet (see below).
 - `mage.html` — an earth mage in a wide stepped hat, juggling floating rocks: idle → 3 steps → gather →
   slam the rocks into the floor (debris, dust, ground wave) → summon them back out of the floor → back-steps.
   Work in progress: built procedurally like the swordsman; a sprite-based version may replace it.
+
+## Voxel earth mage (voxel.html)
+
+The mage rebuilt voxel-musou style ([mike007jd/voxel-musou](https://github.com/mike007jd/voxel-musou), MIT): every
+body part is sculpted in code from boxes in voxel units (1 voxel = 1 pixel of the 55×84 sprite, so proportions come
+straight from it), colour given per voxel by a function (hat tiers and seams, pant folds, spiral leg wraps), meshed
+once with only exposed faces + per-vertex ambient occlusion, and hung rigidly on its rig joint — no skinning.
+The pants use half-size voxels so the balloon steps in finer terraces. Breathing idle with the hat a beat late,
+planted feet by two-bone IK, a 12 s camera orbit.
+
+- `src/voxel/vox.js` — box sculpting + exposed-face mesher with AO.
+- `src/voxel/mage.js` — the mage's parts, rig and leg IK.
+- `src/voxel/main.js` — scene, lights, floor, idle pose, camera; `?pixel=1` renders at ~180 rows with a nearest
+  integer upscale (the voxel model as pixel art), `?az=<deg>` fixes the camera, `?t=<s>` freezes a frame.
 
 ## Earth mage sprite (assets/earth-mage)
 
