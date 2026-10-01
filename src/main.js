@@ -42,9 +42,11 @@ const trailGeo = new THREE.BufferGeometry();
 const tPos = new Float32Array(TRAIL_N * 2 * 3);
 const tA = new Float32Array(TRAIL_N * 2);
 const tS = new Float32Array(TRAIL_N * 2);
+const tK = new Float32Array(TRAIL_N * 2);
 trailGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
 trailGeo.setAttribute('aA', new THREE.BufferAttribute(tA, 1));
 trailGeo.setAttribute('aS', new THREE.BufferAttribute(tS, 1));
+trailGeo.setAttribute('aK', new THREE.BufferAttribute(tK, 1));
 const idx = [];
 for (let i = 0; i < TRAIL_N - 1; i++) {
   const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
@@ -53,11 +55,13 @@ for (let i = 0; i < TRAIL_N - 1; i++) {
 trailGeo.setIndex(idx);
 const trailMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+  uniforms: { uFlash: { value: 0 } },
   vertexShader: /* glsl */`
-    attribute float aA; attribute float aS; varying float vA; varying float vS;
-    void main(){ vA = aA; vS = aS; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    attribute float aA; attribute float aS; attribute float aK; varying float vA; varying float vS; varying float vK;
+    void main(){ vA = aA; vS = aS; vK = aK; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */`
-    varying float vA; varying float vS;
+    uniform float uFlash;
+    varying float vA; varying float vS; varying float vK;
     float bayer4(vec2 p){ ivec2 q = ivec2(mod(p, 4.0)); int i = q.x + q.y * 4;
       int b[16] = int[](0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5); return (float(b[i]) + 0.5) / 16.0; }
     void main(){
@@ -65,6 +69,8 @@ const trailMat = new THREE.ShaderMaterial({
       if (a < bayer4(gl_FragCoord.xy) * 0.35 + 0.12) discard;
       float e = a * (0.55 + 0.45 * vS);
       vec3 c = e > 0.86 ? vec3(1.0, 0.95, 0.8) : e > 0.62 ? vec3(1.0, 0.76, 0.37) : e > 0.42 ? vec3(1.0, 0.45, 0.2) : e > 0.24 ? vec3(0.82, 0.18, 0.17) : vec3(0.53, 0.08, 0.14);
+      // impact frames: the leading edge of the arc flashes white-yellow
+      if (uFlash > 0.5 && vK < 0.035) c = vS > 0.5 ? vec3(1.0, 0.97, 0.88) : vec3(1.0, 0.89, 0.6);
       gl_FragColor = vec4(c, 1.0);
     }`,
 });
@@ -100,6 +106,8 @@ const compMat = new THREE.ShaderMaterial({
     uFlick: { value: 1 }, uShadowX: { value: 0 },
     uHist: { value: Array.from({ length: 12 }, () => new THREE.Vector2()) },
     uTip: { value: new THREE.Vector2() }, uFx: { value: 0 }, uQuant: { value: quant },
+    uHeadDepth: { value: 0.5 }, uSpark: { value: new THREE.Vector4() }, uSparkDir: { value: new THREE.Vector2(1, 0) },
+    uGlint: { value: new THREE.Vector3() },
   },
 });
 const compScene = new THREE.Scene();
@@ -183,6 +191,18 @@ function render(t) {
     R.bladeTip.getWorldPosition(tipW[k]);
     R.bladeMid.getWorldPosition(midW[k]);
   }
+  // impact sparks: origin = blade tip at the impact time, direction = tip motion
+  const SPARK_T = 3.585;
+  const sparkAge = u - SPARK_T;
+  const sparkOn = sparkAge >= 0 && sparkAge < 0.3;
+  if (sparkOn) {
+    const a = new THREE.Vector2(), b = new THREE.Vector2();
+    applyPose(R, SPARK_T - 0.01, { cloth: false }); snapRoot(); toPx(R.bladeTip, a);
+    applyPose(R, SPARK_T, { cloth: false }); snapRoot(); toPx(R.bladeTip, b);
+    const d = b.clone().sub(a); if (d.lengthSq() < 1e-6) d.set(1, 0); d.normalize();
+    compMat.uniforms.uSpark.value.set(b.x, b.y, sparkAge, 1);
+    compMat.uniforms.uSparkDir.value.copy(d);
+  } else compMat.uniforms.uSpark.value.set(0, 0, 0, 0);
   // current pose (with cloth)
   applyPose(R, u, { cloth: true });
   snapRoot();
@@ -193,10 +213,11 @@ function render(t) {
     const j = Math.min(k + 1, TRAIL_N - 1), i0 = Math.max(k - 1, 0);
     const sp = tipW[i0].distanceTo(tipW[j]) / ((j - i0) * TRAIL_DT);
     const speedA = THREE.MathUtils.clamp((sp - 260) / 500, 0, 1);
-    const ageA = 1 - k / (TRAIL_N - 1);
+    const age = k * TRAIL_DT;
+    const ageA = 1 - THREE.MathUtils.smoothstep(age, 0.11, 0.22);
     const ts = wrap(u - k * TRAIL_DT);
     const win = ts > 3.5 && ts < 4.1 ? 1 : 0;   // trail only for the slash itself
-    const a = win * speedA * Math.pow(ageA, 0.8);
+    const a = win * speedA * ageA;
     // extend the outer edge a bit past the tip for a chunky arc
     const ox = tipW[k].x + (tipW[k].x - midW[k].x) * 0.12;
     const oy = tipW[k].y + (tipW[k].y - midW[k].y) * 0.12;
@@ -204,10 +225,13 @@ function render(t) {
     tPos.set([midW[k].x * 0.25 + tipW[k].x * 0.75, midW[k].y * 0.25 + tipW[k].y * 0.75, 0], k * 6 + 3);
     tA[k * 2] = a; tA[k * 2 + 1] = a;
     tS[k * 2] = 1; tS[k * 2 + 1] = 0;
+    tK[k * 2] = age; tK[k * 2 + 1] = age;
   }
   trailGeo.attributes.position.needsUpdate = true;
   trailGeo.attributes.aA.needsUpdate = true;
   trailGeo.attributes.aS.needsUpdate = true;
+  trailGeo.attributes.aK.needsUpdate = true;
+  trailMat.uniforms.uFlash.value = p0.flash > 0.5 ? 1 : 0;
 
   // flame + light uniforms
   const headPx = new THREE.Vector2();
@@ -230,6 +254,12 @@ function render(t) {
   U.uShadowX.value = (R.root.position.x - cam.position.x) / wpp;
   for (let k = 0; k < 12; k++) U.uHist.value[k].copy(histPx[k]);
   U.uFx.value = p0.fxBoost;
+  // flame depth (blade nearer than this draws in front of the fire)
+  R.head.getWorldPosition(_v); _v.project(cam);
+  U.uHeadDepth.value = _v.z * 0.5 + 0.5;
+  // coil glint on the blade edge
+  if (p0.coil > 0.02) { const g = new THREE.Vector2(); toPx(R.bladeEdge, g); U.uGlint.value.set(g.x, g.y, p0.coil); }
+  else U.uGlint.value.set(0, 0, 0);
 
   // passes
   renderer.setClearColor(0x000000, 0);
