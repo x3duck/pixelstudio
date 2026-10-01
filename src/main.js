@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LOOP, wrap, pose } from './pose.js';
+import { LOOP, wrap, pose, swingProgress, bladeHidden, SWING_T0, SWING_T1 } from './pose.js';
 import { buildCharacter, applyPose, toonShared } from './character.js';
 import { compositeVert, compositeFrag } from './composite.js';
 
@@ -14,8 +14,8 @@ const FLOOR_BOTTOM = -30;     // world y at bottom of view
 const CAM_X = -6;             // world x at view centre
 
 const params = new URLSearchParams(location.search);
+const ZOOM_Y = parseFloat(params.get('zy') || '32');   // debug inspection: ?zoom=N&zy=px
 const frozenT = params.has('t') ? parseFloat(params.get('t')) : null;
-const quant = params.get('quant') === '0' ? 0 : 1;
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(1);
@@ -62,15 +62,13 @@ const trailMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uFlash;
     varying float vA; varying float vS; varying float vK;
-    float bayer4(vec2 p){ ivec2 q = ivec2(mod(p, 4.0)); int i = q.x + q.y * 4;
-      int b[16] = int[](0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5); return (float(b[i]) + 0.5) / 16.0; }
     void main(){
       float a = vA * smoothstep(0.0, 0.35, vS);   // fade toward the inner edge of the arc
-      if (a < bayer4(gl_FragCoord.xy) * 0.35 + 0.12) discard;
+      if (a < 0.2) discard;   // hard edge, no dither
       float e = a * (0.55 + 0.45 * vS);
       vec3 c = e > 0.86 ? vec3(1.0, 0.95, 0.8) : e > 0.62 ? vec3(1.0, 0.76, 0.37) : e > 0.42 ? vec3(1.0, 0.45, 0.2) : e > 0.24 ? vec3(0.82, 0.18, 0.17) : vec3(0.53, 0.08, 0.14);
       // impact frames: the leading edge of the arc flashes white-yellow
-      if (uFlash > 0.5 && vK < 0.035) c = vS > 0.5 ? vec3(1.0, 0.97, 0.88) : vec3(1.0, 0.89, 0.6);
+      if (uFlash > 0.5 && vK < 0.02) c = vS > 0.5 ? vec3(1.0, 0.97, 0.88) : vec3(1.0, 0.89, 0.6);
       gl_FragColor = vec4(c, 1.0);
     }`,
 });
@@ -105,7 +103,6 @@ const compMat = new THREE.ShaderMaterial({
     uHead: { value: new THREE.Vector2() }, uLag: { value: new THREE.Vector2() }, uFace: { value: 1 },
     uFlick: { value: 1 }, uShadowX: { value: 0 },
     uHist: { value: Array.from({ length: 12 }, () => new THREE.Vector2()) },
-    uTip: { value: new THREE.Vector2() }, uFx: { value: 0 }, uQuant: { value: quant },
     uHeadDepth: { value: 0.5 }, uSpark: { value: new THREE.Vector4() }, uSparkDir: { value: new THREE.Vector2(1, 0) },
     uGlint: { value: new THREE.Vector3() },
   },
@@ -146,8 +143,10 @@ function toPx(obj, out) {
 }
 function hashf(n) { const s = Math.sin(n * 91.345 + 47.853) * 43758.5453; return s - Math.floor(s); }
 
-const tipW = [], midW = [];
-for (let i = 0; i < TRAIL_N; i++) { tipW.push(new THREE.Vector3()); midW.push(new THREE.Vector3()); }
+const pivW = [];
+for (let i = 0; i < TRAIL_N; i++) pivW.push(new THREE.Vector3());
+const _sh = new THREE.Vector3(), _tp = new THREE.Vector3();
+const SLASH_KEY_T = 3.60;
 const histPx = Array.from({ length: 12 }, () => new THREE.Vector2());
 
 function setCamera(u, shake) {
@@ -160,70 +159,75 @@ function setCamera(u, shake) {
   cam.updateMatrixWorld();
 }
 
-function snapRoot() {
-  // snap root to the art pixel grid (x in world, y=0 floor)
-  const ox = cam.position.x;
-  R.root.position.x = ox + Math.round((R.root.position.x - ox) / wpp) * wpp;
+// snap the root to the art pixel grid (x in world, y=0 floor); applyPose keeps the planted feet in place
+const snapX = (x) => cam.position.x + Math.round((x - cam.position.x) / wpp) * wpp;
+const SNAP = { cloth: false, snap: snapX }, SNAP_CLOTH = { cloth: true, snap: snapX };
+function poseAt(u, opts = SNAP) {
+  applyPose(R, u, opts);
   R.root.updateMatrixWorld(true);
 }
+const lagPx = new THREE.Vector2(), headPx = new THREE.Vector2();
+const _sa = new THREE.Vector2(), _sb = new THREE.Vector2(), _g = new THREE.Vector2();
+const p0 = {};
 
 function render(t) {
   const u = wrap(t);
-  const p0 = pose(u);
+  pose(u, p0);
   const shake = p0.cam > 0.5 ? 1 : 0;
   setCamera(u, shake);
 
   // history samples: head positions (for embers / flame drag)
   for (let k = 11; k >= 0; k--) {
-    applyPose(R, u - k * 0.1, { cloth: false });
-    snapRoot();
+    poseAt(u - k * 0.1);
     toPx(R.head, histPx[k]);
   }
-  const lagPx = new THREE.Vector2();
-  {
-    applyPose(R, u - 0.09, { cloth: false }); snapRoot();
-    toPx(R.head, lagPx);
-  }
-  // sword trail samples
-  for (let k = TRAIL_N - 1; k >= 0; k--) {
-    applyPose(R, u - k * TRAIL_DT, { cloth: false });
-    snapRoot();
-    R.bladeTip.getWorldPosition(tipW[k]);
-    R.bladeMid.getWorldPosition(midW[k]);
+  poseAt(u - 0.09);
+  toPx(R.head, lagPx);
+  // slash smear: a crescent around the near shoulder, from the coil tip direction over the top of the
+  // fire to the strike tip. Sampled at past times so it trails and fades by age (pure in u).
+  const trailOn = u > SWING_T0 && u < SWING_T1 + 0.25;
+  let a0 = 0, a1 = 0, r0 = 0, r1 = 0;
+  if (trailOn) {
+    poseAt(SWING_T0); R.rArm.getWorldPosition(_sh); R.bladeTip.getWorldPosition(_tp);
+    a0 = Math.atan2(_tp.y - _sh.y, _tp.x - _sh.x); r0 = Math.hypot(_tp.x - _sh.x, _tp.y - _sh.y);
+    poseAt(SLASH_KEY_T); R.rArm.getWorldPosition(_sh); R.bladeTip.getWorldPosition(_tp);
+    a1 = Math.atan2(_tp.y - _sh.y, _tp.x - _sh.x); r1 = Math.hypot(_tp.x - _sh.x, _tp.y - _sh.y);
+    if (a1 > a0) a1 -= Math.PI * 2;   // sweep clockwise, over the top
+    for (let k = TRAIL_N - 1; k >= 0; k--) {
+      poseAt(u - k * TRAIL_DT);
+      R.rArm.getWorldPosition(pivW[k]);
+    }
   }
   // impact sparks: origin = blade tip at the impact time, direction = tip motion
-  const SPARK_T = 3.585;
+  const SPARK_T = 3.575;
   const sparkAge = u - SPARK_T;
   const sparkOn = sparkAge >= 0 && sparkAge < 0.3;
   if (sparkOn) {
-    const a = new THREE.Vector2(), b = new THREE.Vector2();
-    applyPose(R, SPARK_T - 0.01, { cloth: false }); snapRoot(); toPx(R.bladeTip, a);
-    applyPose(R, SPARK_T, { cloth: false }); snapRoot(); toPx(R.bladeTip, b);
-    const d = b.clone().sub(a); if (d.lengthSq() < 1e-6) d.set(1, 0); d.normalize();
-    compMat.uniforms.uSpark.value.set(b.x, b.y, sparkAge, 1);
+    poseAt(SPARK_T - 0.01); toPx(R.bladeTip, _sa);
+    poseAt(SPARK_T); toPx(R.bladeTip, _sb);
+    const d = _sa.sub(_sb).negate(); if (d.lengthSq() < 1e-6) d.set(1, 0); d.normalize();
+    compMat.uniforms.uSpark.value.set(_sb.x, _sb.y, sparkAge, 1);
     compMat.uniforms.uSparkDir.value.copy(d);
   } else compMat.uniforms.uSpark.value.set(0, 0, 0, 0);
-  // current pose (with cloth)
-  applyPose(R, u, { cloth: true });
-  snapRoot();
-  R.root.updateMatrixWorld(true);
+  // current pose (with cloth); the blade is replaced by the smear's leading edge while it sweeps
+  poseAt(u, SNAP_CLOTH);
+  R.weapon.visible = !bladeHidden(u);
 
-  // trail geometry: alpha by age and by tip speed
+  // trail geometry
   for (let k = 0; k < TRAIL_N; k++) {
-    const j = Math.min(k + 1, TRAIL_N - 1), i0 = Math.max(k - 1, 0);
-    const sp = tipW[i0].distanceTo(tipW[j]) / ((j - i0) * TRAIL_DT);
-    const speedA = THREE.MathUtils.clamp((sp - 260) / 500, 0, 1);
     const age = k * TRAIL_DT;
-    const ageA = 1 - THREE.MathUtils.smoothstep(age, 0.11, 0.22);
-    const ts = wrap(u - k * TRAIL_DT);
-    const win = ts > 3.5 && ts < 4.1 ? 1 : 0;   // trail only for the slash itself
-    const a = win * speedA * ageA;
-    // extend the outer edge a bit past the tip for a chunky arc
-    const ox = tipW[k].x + (tipW[k].x - midW[k].x) * 0.12;
-    const oy = tipW[k].y + (tipW[k].y - midW[k].y) * 0.12;
-    tPos.set([ox, oy, 0], k * 6);
-    tPos.set([midW[k].x * 0.25 + tipW[k].x * 0.75, midW[k].y * 0.25 + tipW[k].y * 0.75, 0], k * 6 + 3);
-    tA[k * 2] = a; tA[k * 2 + 1] = a;
+    const pr = trailOn ? swingProgress(u - age) : 0;
+    const ageA = 1 - THREE.MathUtils.smoothstep(age, 0.02, 0.2);
+    const uk = wrap(u - age);
+    const a = pr > 0 && uk <= SWING_T1 + 0.006 ? ageA : 0;   // only samples taken while the arc sweeps
+    const endA = 1 - THREE.MathUtils.smoothstep(u - SWING_T1, 0.07, 0.11);   // whole arc gone ~0.1 s after the hit
+    const th = a0 + (a1 - a0) * pr;
+    const r = (r0 + (r1 - r0) * pr) * (1 + 0.12 * Math.sin(Math.PI * pr));
+    const c = Math.cos(th), sn = Math.sin(th), pv = pivW[k];
+    const o6 = k * 6;
+    tPos[o6] = pv.x + c * r * 1.05; tPos[o6 + 1] = pv.y + sn * r * 1.05; tPos[o6 + 2] = 0;
+    tPos[o6 + 3] = pv.x + c * r * 0.84; tPos[o6 + 4] = pv.y + sn * r * 0.84; tPos[o6 + 5] = 0;
+    tA[k * 2] = a * endA; tA[k * 2 + 1] = a * endA;
     tS[k * 2] = 1; tS[k * 2 + 1] = 0;
     tK[k * 2] = age; tK[k * 2 + 1] = age;
   }
@@ -234,7 +238,6 @@ function render(t) {
   trailMat.uniforms.uFlash.value = p0.flash > 0.5 ? 1 : 0;
 
   // flame + light uniforms
-  const headPx = new THREE.Vector2();
   toPx(R.head, headPx);
   headPx.set(Math.round(headPx.x), Math.round(headPx.y));
   const flick = 0.82 + 0.18 * hashf(Math.floor(u * 14));
@@ -253,12 +256,11 @@ function render(t) {
   U.uFlick.value = flick;
   U.uShadowX.value = (R.root.position.x - cam.position.x) / wpp;
   for (let k = 0; k < 12; k++) U.uHist.value[k].copy(histPx[k]);
-  U.uFx.value = p0.fxBoost;
   // flame depth (blade nearer than this draws in front of the fire)
   R.head.getWorldPosition(_v); _v.project(cam);
   U.uHeadDepth.value = _v.z * 0.5 + 0.5;
   // coil glint on the blade edge
-  if (p0.coil > 0.02) { const g = new THREE.Vector2(); toPx(R.bladeEdge, g); U.uGlint.value.set(g.x, g.y, p0.coil); }
+  if (p0.coil > 0.02) { toPx(R.bladeEdge, _g); U.uGlint.value.set(_g.x, _g.y, p0.coil); }
   else U.uGlint.value.set(0, 0, 0);
 
   // passes
@@ -273,7 +275,7 @@ function render(t) {
   renderer.setRenderTarget(rtFinal);
   renderer.render(compScene, postCam);
   blitMat.uniforms.tSrc.value = rtFinal.texture;
-  if (blitMat.uniforms.uZoom.value > 1) blitMat.uniforms.uC.value.set((U.uShadowX.value + 12) / lowW, (headPx.y - (parseFloat(params.get("zy") || "32"))) / lowH);
+  if (blitMat.uniforms.uZoom.value > 1) blitMat.uniforms.uC.value.set((U.uShadowX.value + 12) / lowW, (headPx.y - ZOOM_Y) / lowH);
   renderer.setRenderTarget(null);
   renderer.render(blitScene, postCam);
 }

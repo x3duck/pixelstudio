@@ -1,5 +1,5 @@
 // Low-res composite pass: background + character outline/rim + procedural pixel flame +
-// particles + quantized bloom + palette quantization. Runs once per art pixel.
+// particles + palette quantization. Runs once per art pixel.
 
 const PALETTE = [
   // outline / blacks / charcoal
@@ -51,9 +51,6 @@ uniform float uFace;      // +1 facing right
 uniform float uFlick;
 uniform float uShadowX;   // px
 uniform vec2 uHist[12];   // head px positions at u - k*0.1
-uniform vec2 uTip;        // sword tip px
-uniform float uFx;        // slash fx boost
-uniform float uQuant;     // palette quantize on/off
 uniform float uHeadDepth; // depth-buffer value of the flame (for blade-in-front ordering)
 uniform vec4 uSpark;      // impact spark origin px (xy), age s (z), active (w)
 uniform vec2 uSparkDir;   // direction of the blade tip at impact
@@ -68,57 +65,69 @@ float vnoise(vec2 p){
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h12(i), h12(i + vec2(1,0)), f.x), mix(h12(i + vec2(0,1)), h12(i + vec2(1,1)), f.x), f.y);
 }
-float bayer4(vec2 p){
-  ivec2 q = ivec2(mod(p, 4.0));
-  int i = q.x + q.y * 4;
-  int b[16] = int[](0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
-  return (float(b[i]) + 0.5) / 16.0;
-}
-
 // ---------------- background ----------------
 // large rounded, pillowed flagstones in loosely staggered rows, 1 px soft mortar
-float stoneSdf(vec2 w, out vec2 id){
-  // uneven row heights: boundary k sits at k*22 + jitter
+// row boundary k: uneven heights (about +-35%)
+float rowB(float k){ return k * 22.0 + (h12(vec2(k, 1.3)) - 0.5) * 15.0; }
+float stoneSdf(vec2 w, out vec2 id, out vec4 info){
   float row = floor(w.y / 22.0);
-  float yb0 = row * 22.0 + (h12(vec2(row, 1.3)) - 0.5) * 8.0;
-  if (w.y < yb0) row -= 1.0;
-  else if (w.y >= (row + 1.0) * 22.0 + (h12(vec2(row + 1.0, 1.3)) - 0.5) * 8.0) row += 1.0;
-  float rb0 = row * 22.0 + (h12(vec2(row, 1.3)) - 0.5) * 8.0;
-  float rb1 = (row + 1.0) * 22.0 + (h12(vec2(row + 1.0, 1.3)) - 0.5) * 8.0;
-  float off = h12(vec2(row, 4.7)) * 46.0;
-  float bw = 34.0 + 10.0 * h12(vec2(row, 8.8));
+  if (w.y < rowB(row)) row -= 1.0;
+  else if (w.y >= rowB(row + 1.0)) row += 1.0;
+  float rb0 = rowB(row), rb1 = rowB(row + 1.0);
+  float off = h12(vec2(row, 4.7)) * 61.0 + row * 17.0;   // no regular stagger
+  float bw = 30.0 + 16.0 * h12(vec2(row, 8.8));
   float xx = w.x + off;
   float col = floor(xx / bw);
-  float x0 = col * bw + (h12(vec2(col, row)) - 0.5) * 18.0;
-  float x1 = (col + 1.0) * bw + (h12(vec2(col + 1.0, row)) - 0.5) * 18.0;
-  if (xx < x0) { col -= 1.0; x1 = x0; x0 = col * bw + (h12(vec2(col, row)) - 0.5) * 18.0; }
-  else if (xx > x1) { col += 1.0; x0 = x1; x1 = (col + 1.0) * bw + (h12(vec2(col + 1.0, row)) - 0.5) * 18.0; }
+  float jj = 0.76 * bw;   // joint jitter: widths vary about +-50%
+  float x0 = col * bw + (h12(vec2(col, row)) - 0.5) * jj;
+  float x1 = (col + 1.0) * bw + (h12(vec2(col + 1.0, row)) - 0.5) * jj;
+  if (xx < x0) { col -= 1.0; x1 = x0; x0 = col * bw + (h12(vec2(col, row)) - 0.5) * jj; }
+  else if (xx > x1) { col += 1.0; x0 = x1; x1 = (col + 1.0) * bw + (h12(vec2(col + 1.0, row)) - 0.5) * jj; }
   id = vec2(col, row);
   float hv = h12(id + 0.37);
-  float y0 = rb0 + (hv - 0.5) * 1.5, y1 = rb1 + (h12(id + 5.1) - 0.5) * 1.5;
+  float y0 = rb0 + (hv - 0.5) * 2.0, y1 = rb1 + (h12(id + 5.1) - 0.5) * 2.0;
   vec2 c = vec2(0.5 * (x0 + x1), 0.5 * (y0 + y1));
   vec2 hs = vec2(0.5 * (x1 - x0), 0.5 * (y1 - y0)) - 0.5;
-  float r = 5.5 + 3.0 * h12(id + 2.3);
-  vec2 d = abs(vec2(xx, w.y) - c) - (hs - r);
-  return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
+  float r = 1.5 + 3.0 * h12(id + 2.3);          // corner radius varies 1-4 px per stone
+  vec2 lp = vec2(xx, w.y) - c;
+  vec2 d = abs(lp) - (hs - r);
+  float e = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
+  // chipped corners: a 2-3 px mortar bite in one or two corners
+  vec2 cq = sign(lp);
+  float ck = h12(id + cq * 0.71 + 3.3);
+  vec2 cd = hs - abs(lp);
+  if (ck > 0.62 && cd.x < 2.5 && cd.y < 2.5) e = max(e, 0.0);
+  info = vec4(lp, hs);
+  return e;
 }
 
 vec3 wallColor(vec2 w, vec2 pix){
-  vec2 id; vec2 idn;
-  float e = stoneSdf(w, id);
+  vec2 id; vec2 idn; vec4 info, infn;
+  float e = stoneSdf(w, id, info);
   vec3 stone = vec3(0.098, 0.204, 0.224);                 // ~15% darker teal
   stone *= 0.93 + 0.1 * h12(id + 9.7);
   vec3 c = stone;
   float m = uWpp;
   if (e > -1.0 * m) c = stone * 0.76;                      // mortar (soft contrast)
   else if (e > -2.6 * m) {
-    float up = stoneSdf(w + vec2(0.0, 1.5) * m, idn);
-    float lf = stoneSdf(w + vec2(-1.5, 0.0) * m, idn);
-    float dn = stoneSdf(w + vec2(0.0, -1.5) * m, idn);
-    float rt = stoneSdf(w + vec2(1.5, 0.0) * m, idn);
+    float up = stoneSdf(w + vec2(0.0, 1.5) * m, idn, infn);
+    float lf = stoneSdf(w + vec2(-1.5, 0.0) * m, idn, infn);
+    float dn = stoneSdf(w + vec2(0.0, -1.5) * m, idn, infn);
+    float rt = stoneSdf(w + vec2(1.5, 0.0) * m, idn, infn);
     if (up > -1.0 * m || lf > -1.0 * m) c = stone * 1.11;      // lit top/left lip
     else if (dn > -1.0 * m || rt > -1.0 * m) c = stone * 0.88; // shaded bottom/right lip
-  } else if (e < -7.0 * m) c = stone * 1.04;               // pillowed centre
+  } else {
+    if (e < -7.0 * m) c = stone * 1.03;                    // slightly raised centre
+    // 1 px hairline crack on ~15% of the stones
+    if (h12(id + 7.7) > 0.85) {
+      float ca = h12(id + 1.9) * 3.14159;
+      vec2 cdir = vec2(cos(ca), sin(ca));
+      vec2 lp = info.xy - (vec2(h12(id + 4.4), h12(id + 6.6)) - 0.5) * info.zw;
+      float along = dot(lp, cdir), across = dot(lp, vec2(-cdir.y, cdir.x));
+      across += (h12(vec2(floor(along / 3.0), id.x)) - 0.5) * 1.2;
+      if (abs(across) < 0.5 * m && abs(along) < 0.35 * info.z) c = stone * 0.8;
+    }
+  }
   // vertical gradient: darker toward the top
   float grad = smoothstep(150.0, 10.0, w.y);
   c *= mix(0.58, 1.0, grad);
@@ -157,6 +166,7 @@ const vec2 CE = vec2(0.8, 9.0);   // core mass centre (x scaled by uFace)
 
 // flame density field around the base (q = px relative to the flame base)
 float flameField(vec2 q){
+  q /= vec2(1.1, 1.2);
   float tf = uTf;
   float H = 27.0;
   vec2 ce = vec2(uFace * CE.x, CE.y);
@@ -211,8 +221,20 @@ float flameField(vec2 q){
   // rare detached flame pixels above the column
   float det = step(0.9, vnoise(vec2(x * 0.7, (y - tf * 26.0) * 0.55))) * step(H * 0.62, y) * step(y, H + 11.0) * step(abs(x), 5.0);
   if (det > 0.5) F = max(F, 0.12);
-  if (length(q - vec2(0.0, 14.0)) > 40.0) F = -1.0;
+  if (length(q - vec2(0.0, 14.0)) > 36.0) F = -1.0;
   return F;
+}
+
+// core cluster membership for integer offset g (rows -2..2, per-row extents jittered per flame frame)
+float coreIn(vec2 g){
+  if (g.y < -2.0 || g.y > 2.0) return 0.0;
+  float fr = uTf * 12.0;
+  float skew = (g.y >= 1.0) ? floor((vnoise(vec2(7.0, uTf * 4.0)) - 0.5) * 2.6 + 0.5 + clamp(uLag.x * 0.2, -1.0, 1.0)) : 0.0;
+  float edge = (g.y == -2.0 || g.y == 2.0) ? 1.0 : 0.0;
+  float l = -1.0 + edge * step(0.4, h12(vec2(g.y + 3.0, fr))) - (1.0 - edge) * step(0.8, h12(vec2(g.y + 7.0, fr)));
+  float r = 2.0 - edge * step(0.35, h12(vec2(g.y + 5.0, fr))) + (1.0 - edge) * step(0.75, h12(vec2(g.y + 1.0, fr))) * step(0.0, g.y);
+  float x = g.x - skew;
+  return (x >= l && x <= r) ? 1.0 : 0.0;
 }
 
 // returns rgb + coverage (a); F = density (for the ring / contour)
@@ -220,13 +242,17 @@ vec4 flame(vec2 pix, out float F){
   vec2 q = pix + 0.5 - uHead;
   F = flameField(q);
   vec2 ce = vec2(uFace * CE.x, CE.y);
-  float hy = clamp((q.y - 4.0) / 27.0, 0.0, 1.0);
-  // white-hot core: raised and pushed toward the facing side
-  vec2 eq = q - vec2(ce.x + uFace * 2.0, ce.y + 2.0);
-  float ed = length(eq * vec2(1.0, 1.1));
-  if (ed < 2.0) return vec4(1.0, 0.98, 0.9, 1.0);
-  if (ed < 3.2) return vec4(1.0, 0.86, 0.45, 1.0);
-  if (ed < 4.6 && F > 0.0) return vec4(1.0, 0.55, 0.22, 1.0);
+  float hy = clamp((q.y / 1.2 - 4.0) / 27.0, 0.0, 1.0);
+  // white-hot core: a hard, irregular 4x5 px cluster whose shape flickers on the 12 fps step,
+  // skewed toward the tip of the current main tongue
+  vec2 cc = floor(uHead + vec2(ce.x * 1.1 + uFace * 1.5, ce.y * 1.2 + 2.0));
+  vec2 g = floor(pix) - cc;
+  float cs = coreIn(g);
+  if (cs > 0.5) {
+    float nIn = coreIn(g + vec2(1, 0)) * coreIn(g - vec2(1, 0)) * coreIn(g + vec2(0, 1)) * coreIn(g - vec2(0, 1));
+    return nIn > 0.5 ? vec4(1.0, 0.98, 0.9, 1.0) : vec4(1.0, 0.86, 0.45, 1.0);
+  }
+  if (F > 0.0 && coreIn(g + vec2(1, 0)) + coreIn(g - vec2(1, 0)) + coreIn(g + vec2(0, 1)) + coreIn(g - vec2(0, 1)) > 0.5) return vec4(1.0, 0.62, 0.26, 1.0);
   if (F <= 0.0) return vec4(0.0);
   vec3 c;
   if (F > 0.62) c = vec3(1.0, 0.46, 0.2);
@@ -240,6 +266,8 @@ vec4 flame(vec2 pix, out float F){
 // rising embers spawned from the head's past positions (pure in u)
 vec4 embers(vec2 pix){
   vec2 p = pix + 0.5;
+  float floorPy = -uOrigin.y / uWpp;
+  if (p.y < floorPy) return vec4(0.0);
   for (int i = 0; i < 16; i++) {
     float fi = float(i);
     float m = 5.0 + mod(fi, 3.0);          // periods dividing the loop
@@ -252,7 +280,7 @@ vec4 embers(vec2 pix){
     if (a > life) continue;
     float t = a / life;
     vec2 pos = sp + vec2((h11(fi * 5.3) - 0.5) * 10.0 + sin(t * 6.0 + fi) * 2.5,
-                         14.0 + t * (26.0 + 14.0 * h11(fi * 2.2)));
+                         18.0 + t * (28.0 + 14.0 * h11(fi * 2.2)));
     if (all(equal(floor(p), floor(pos)))) {
       if (t < 0.3) return vec4(1.0, 0.78, 0.37, 1.0);
       if (t < 0.68) return vec4(0.94, 0.31, 0.17, 1.0);
@@ -262,10 +290,18 @@ vec4 embers(vec2 pix){
   return vec4(0.0);
 }
 
-// impact sparks: 6 pixels bursting from the arc tip (pure in u)
+// impact sparks: a plus-star flash at the tip, then 6 short streaks bursting from it (pure in u)
+float segD(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0); return length(pa - ba * h); }
 vec4 sparks(vec2 pix){
   if (uSpark.w < 0.5) return vec4(0.0);
-  vec2 p = pix + 0.5;
+  vec2 p = floor(pix) + 0.5;
+  float floorPy = -uOrigin.y / uWpp;
+  if (p.y < floorPy) return vec4(0.0);
+  // 5 px plus-star for the first 3 frames of the hit
+  if (uSpark.z < 0.05) {
+    vec2 d = abs(floor(pix) - floor(uSpark.xy));
+    if (min(d.x, d.y) < 0.5 && d.x + d.y < 2.5) return d.x + d.y < 0.5 ? vec4(1.0, 0.97, 0.88, 1.0) : vec4(1.0, 0.86, 0.45, 1.0);
+  }
   for (int i = 0; i < 6; i++) {
     float fi = float(i);
     float life = 0.16 + 0.1 * h11(fi * 4.1 + 1.0);
@@ -273,13 +309,16 @@ vec4 sparks(vec2 pix){
     if (age < 0.0 || age > life) continue;
     float a = (h11(fi * 2.3 + 0.5) - 0.5) * 2.4;
     vec2 d = vec2(uSparkDir.x * cos(a) - uSparkDir.y * sin(a), uSparkDir.x * sin(a) + uSparkDir.y * cos(a));
-    float sp = 70.0 + 70.0 * h11(fi * 7.7);
+    float sp = 110.0 + 70.0 * h11(fi * 7.7);
     vec2 pos = uSpark.xy + d * sp * age + vec2(0.0, -90.0) * age * age;
-    vec2 pos2 = pos - d * sp * 0.012;
+    if (pos.y < floorPy) continue;
     float t = age / life;
     vec3 c = t < 0.35 ? vec3(1.0, 0.97, 0.88) : (t < 0.7 ? vec3(1.0, 0.76, 0.37) : vec3(0.94, 0.31, 0.17));
     if (all(equal(floor(p), floor(pos)))) return vec4(c, 1.0);
-    if (i < 3 && t < 0.5 && all(equal(floor(p), floor(pos2)))) return vec4(1.0, 0.76, 0.37, 1.0);
+    if (t < 0.6) {
+      float L = t < 0.3 ? 4.0 : 2.0;
+      if (segD(p, floor(pos) + 0.5, floor(pos - d * L) + 0.5) < 0.5) return vec4(t < 0.3 ? vec3(1.0, 0.76, 0.37) : vec3(0.94, 0.31, 0.17), 1.0);
+    }
   }
   return vec4(0.0);
 }
@@ -307,8 +346,8 @@ vec4 coilFx(vec2 pix){
   return vec4(0.0);
 }
 
-vec3 quantize(vec3 c, float dith){
-  vec3 cc = clamp(c + (dith - 0.5) * 0.0, 0.0, 1.0);
+vec3 quantize(vec3 c){
+  vec3 cc = clamp(c, 0.0, 1.0);
   float best = 1e9; vec3 bc = cc;
   for (int i = 0; i < NPAL; i++) {
     vec3 d = (PAL[i] - cc) * vec3(1.0, 1.25, 0.8);
@@ -321,12 +360,17 @@ vec3 quantize(vec3 c, float dith){
 ivec2 cl(ivec2 p){ return clamp(p, ivec2(0), ivec2(uRes) - 1); }
 float maskAt(ivec2 p){ return step(0.05, texelFetch(tChar, cl(p), 0).a); }
 float depthAt(ivec2 p){ return texelFetch(tDepth, cl(p), 0).r; }
+// material code written by the toon shader: a = (id*2 + up + 4) / 64
+float codeAt(ivec2 p){ return floor(texelFetch(tChar, cl(p), 0).a * 64.0 + 0.5) - 4.0; }
+float idOf(float code){ return floor(code * 0.5 + 0.01); }
+bool isMetal(float id){ return id == 2.0 || id == 5.0 || id == 6.0 || id == 11.0 || id == 15.0 || id == 17.0; }
+bool isCrim(float id){ return id == 7.0 || id == 8.0; }
+float fxA(ivec2 p){ return step(0.5, texelFetch(tFx, cl(p), 0).a); }
 
 void main(){
   ivec2 ip = ivec2(floor(vUv * uRes));
   vec2 pix = vec2(ip);
   vec2 w = uOrigin + (pix + 0.5) * uWpp;
-  float dith = bayer4(pix);
 
   // ---- background ----
   vec3 col = w.y >= 0.0 ? wallColor(w, pix) : floorColor(w);
@@ -337,8 +381,8 @@ void main(){
   if (sh > 0.0) col *= sh > 0.45 ? 0.45 : 0.68;
   // very subtle warm light pool on the wall behind the flame (flat bands, no dither)
   if (w.y >= 0.0) {
-    vec2 hq = (pix - uHead - vec2(0.0, 12.0));
-    float wl = clamp(1.0 - length(hq * vec2(0.85, 1.0)) / 44.0, 0.0, 1.0) * uFlick;
+    vec2 hq = (pix - uHead - vec2(0.0, 14.0));
+    float wl = clamp(1.0 - length(hq * vec2(0.85, 1.0)) / 46.0, 0.0, 1.0) * uFlick;
     wl = floor(wl * wl * 3.0) / 3.0;
     col = col * (1.0 + 0.22 * wl) + vec3(0.022, 0.004, 0.0) * wl;
   }
@@ -348,34 +392,41 @@ void main(){
   float isC = step(0.05, C.a);
   float mU = maskAt(ip + ivec2(0, 1)), mD = maskAt(ip + ivec2(0, -1));
   float mL = maskAt(ip + ivec2(-1, 0)), mR = maskAt(ip + ivec2(1, 0));
-  bool charPix = false;
   float nearHead = 0.0;   // character pixel (or its contour) lies in front of the flame
   float dNear = uHeadDepth - 0.022;
   if (isC > 0.5) {
-    charPix = true;
     vec3 c = C.rgb;
     float d0 = depthAt(ip);
     nearHead = step(d0, dNear);
+    float code = codeAt(ip);
+    float id = idOf(code);
+    float up = mod(code, 2.0);
+    // depth-discontinuity lines (near-black) and material-boundary lines (deep tone of the farther side)
     float th = 0.0125;
-    float line = 0.0;
-    if (mU > 0.5 && d0 - depthAt(ip + ivec2(0, 1)) > th) line = 1.0;
-    if (mL > 0.5 && d0 - depthAt(ip + ivec2(-1, 0)) > th) line = 1.0;
-    if (mR > 0.5 && d0 - depthAt(ip + ivec2(1, 0)) > th) line = 1.0;
-    if (mD > 0.5 && d0 - depthAt(ip + ivec2(0, -1)) > th) line = 1.0;
-    float metal = step(abs(C.a - 0.8), 0.05);
-    float crim = step(abs(C.a - 0.6), 0.05);
-    if (mU < 0.5) {
-      vec3 rim = metal > 0.5 ? vec3(0.80, 0.84, 0.92) : (crim > 0.5 ? vec3(1.0, 0.36, 0.25) : c * 1.7 + vec3(0.07, 0.08, 0.11));
-      c = rim;
-    } else if (mR < 0.5) {
-      vec3 rim = metal > 0.5 ? vec3(0.42, 0.46, 0.56) : (crim > 0.5 ? vec3(0.88, 0.2, 0.2) : c * 1.35 + vec3(0.05, 0.06, 0.09));
-      c = rim;
+    float line = 0.0, seam = 0.0;
+    for (int k = 0; k < 4; k++) {
+      ivec2 o = k == 0 ? ivec2(0, 1) : (k == 1 ? ivec2(-1, 0) : (k == 2 ? ivec2(1, 0) : ivec2(0, -1)));
+      if (maskAt(ip + o) < 0.5) continue;
+      float dn = depthAt(ip + o);
+      if (d0 - dn > th) line = 1.0;
+      else if (idOf(codeAt(ip + o)) != id && dn < d0) seam = 1.0;
     }
+    bool metal = isMetal(id), crim = isCrim(id);
+    // rim pixels only on edge runs of 2+ px (no dashed staircases on diagonals)
+    bool runU = (maskAt(ip + ivec2(1, 0)) > 0.5 && maskAt(ip + ivec2(1, 1)) < 0.5) || (maskAt(ip + ivec2(-1, 0)) > 0.5 && maskAt(ip + ivec2(-1, 1)) < 0.5);
+    bool runR = (maskAt(ip + ivec2(0, 1)) > 0.5 && maskAt(ip + ivec2(1, 1)) < 0.5) || (maskAt(ip + ivec2(0, -1)) > 0.5 && maskAt(ip + ivec2(1, -1)) < 0.5);
+    if (mU < 0.5 && runU) {
+      if (metal) { if (up > 0.5) c = vec3(0.80, 0.84, 0.92); else c = c * 1.3 + vec3(0.03, 0.035, 0.05); }
+      else if (crim) c = vec3(0.62, 0.12, 0.15);
+      else c = c * 1.55 + vec3(0.05, 0.06, 0.08);
+    } else if (mR < 0.5 && runR && !crim) {
+      c = metal ? vec3(0.42, 0.46, 0.56) : c * 1.3 + vec3(0.04, 0.045, 0.07);
+    }
+    if (seam > 0.5 && line < 0.5) c = c * 0.5;
     if (line > 0.5) c = mix(c, vec3(0.03, 0.03, 0.05), 0.85);
     col = c;
   } else if (mU + mD + mL + mR > 0.5) {
     col = vec3(0.027, 0.027, 0.047);   // 1px near-black contour
-    charPix = true;
     float dn = 1.0;
     if (mU > 0.5) dn = min(dn, depthAt(ip + ivec2(0, 1)));
     if (mD > 0.5) dn = min(dn, depthAt(ip + ivec2(0, -1)));
@@ -384,23 +435,26 @@ void main(){
     nearHead = step(dn, dNear);
   }
 
-  // ---- slash trail (fx buffer) ----
-  vec4 F = texelFetch(tFx, ip, 0);
-  if (F.a > 0.5) { col = F.rgb; charPix = true; }
-  float fb = 0.0;
-  for (int y = -3; y <= 3; y++) for (int x = -3; x <= 3; x++) {
-    float wgt = 1.0 - length(vec2(x, y)) / 4.3;
-    if (wgt <= 0.0) continue;
-    fb += texelFetch(tFx, cl(ip + ivec2(x, y)), 0).a * wgt;
+  // ---- flame field (needed first: the slash trail is knocked out around the fire) ----
+  vec2 q = pix + 0.5 - uHead;
+  bool inFlame = length(q - vec2(0.0, 16.0)) < 44.0;
+  float Fd = -1.0;
+  vec4 fl = vec4(0.0);
+  if (inFlame) fl = flame(pix, Fd);
+
+  // ---- slash trail (fx buffer): solid arc + a solid 1 px dark-red contour, no dither ----
+  float Fa = fxA(ip);
+  bool knock = inFlame && Fd > -0.17;
+  if (!knock) {
+    if (Fa > 0.5) col = texelFetch(tFx, ip, 0).rgb;
+    else {
+      float nb = fxA(ip + ivec2(1, 0)) + fxA(ip + ivec2(-1, 0)) + fxA(ip + ivec2(0, 1)) + fxA(ip + ivec2(0, -1));
+      if (nb > 0.5) col = vec3(0.37, 0.06, 0.10);
+    }
   }
-  fb = clamp(fb / 6.0, 0.0, 1.0);
-  if (F.a < 0.5 && fb > 0.02 && fb * 1.3 > dith) col = fb > 0.45 ? vec3(0.53, 0.08, 0.14) : vec3(0.37, 0.06, 0.10);
 
   // ---- flame head ----
-  vec2 q = pix + 0.5 - uHead;
-  if (length(q - vec2(0.0, 14.0)) < 42.0) {
-    float Fd;
-    vec4 fl = flame(pix, Fd);
+  if (inFlame) {
     // the fire rises out of the collar opening (curved rim seen slightly from above)
     float rimY = 2.2 + 1.4 * clamp(pow(q.x / 7.0, 2.0), 0.0, 1.0);
     bool hidden = isC > 0.5 && q.y < rimY;
@@ -408,18 +462,18 @@ void main(){
     if (nearHead > 0.5) fl.a = 0.0;     // a nearer blade/arm draws in front of the flame
     if (fl.a > 0.5) {
       // darker-red contour step on the lower/back edge
-      float back = clamp(-uFace * (q.x - uFace * CE.x) / 6.0, 0.0, 1.0);
-      float low = clamp((CE.y + 2.0 - q.y) / 6.0, 0.0, 1.0);
+      float back = clamp(-uFace * (q.x - uFace * CE.x * 1.1) / 6.6, 0.0, 1.0);
+      float low = clamp((CE.y * 1.2 + 2.0 - q.y) / 7.0, 0.0, 1.0);
       if (max(back, low) > 0.35 && Fd < 0.2 && fl.r < 0.9) fl.rgb = vec3(0.37, 0.045, 0.08);
-      col = fl.rgb; charPix = true;
+      col = fl.rgb;
     } else if (nearHead < 0.5) {
       if (isC > 0.5 && q.y < rimY && q.y > rimY - 1.0 && abs(q.x) < 8.5) {
         // 1 px dark collar contour where the fire meets the neck opening
         float Fu; flame(pix + vec2(0.0, 1.0), Fu);
         if (Fu > 0.0 || Fd > 0.0) col = vec3(0.027, 0.027, 0.047);
-      } else if (isC < 0.5 && F.a < 0.5) {
-        // tight ring of one dark crimson around the flame (1-2 px)
-        float back = clamp(-uFace * (q.x - uFace * CE.x) / 6.0, 0.0, 1.0);
+      } else if (isC < 0.5) {
+        // tight ring of one dark crimson around the flame (1-2 px); also separates it from the slash arc
+        float back = clamp(-uFace * (q.x - uFace * CE.x * 1.1) / 6.6, 0.0, 1.0);
         float thr = -0.09 - 0.06 * back;
         if (Fd > thr && q.y > 0.0) col = vec3(0.235, 0.043, 0.082);
       }
@@ -433,6 +487,6 @@ void main(){
   if (spk.a > 0.5) col = spk.rgb;
 
   // ---- palette quantization ----
-  if (uQuant > 0.5) col = quantize(col, dith);
+  col = quantize(col);
   gl_FragColor = vec4(col, 1.0);
 }`;

@@ -25,35 +25,35 @@ void main(){
 
 const toonFrag = /* glsl */`
 uniform vec3 uBase; uniform vec3 uShade; uniform vec3 uLite; uniform vec3 uHi; uniform vec3 uDeep;
-uniform float uMetal; uniform float uCode; uniform float uHeadMul;
+uniform float uMetal; uniform float uId; uniform float uHeadMul; uniform float uBias;
 uniform vec3 uKey; uniform vec3 uHeadPos; uniform float uHeadI;
 varying vec3 vN; varying vec3 vW;
 void main(){
   vec3 n = normalize(vN);
   if (!gl_FrontFacing) n = -n;
-  float d = dot(n, uKey);
+  float d = dot(n, uKey) + uBias;
   vec3 c = d > 0.62 ? uLite : (d > 0.16 ? uBase : (d > -0.35 ? uShade : uDeep));
   if (uMetal > 0.5) {
     vec3 sl = normalize(vec3(-0.65, 0.7, 0.3));
     vec3 r = reflect(-sl, n);
     if (r.z > 0.975) c = uHi;
   }
-  // flame light: warm banded tint on faces turned toward the head
+  // flame light: warm banded tint only on faces close to (and turned toward) the head
   vec3 L = uHeadPos - vW;
   float dist = length(L);
   float hd = dot(n, L / max(dist, 0.001));
-  float att = clamp(1.0 - dist / 30.0, 0.0, 1.0) * uHeadI * uHeadMul;
+  float att = clamp(1.0 - dist / 17.0, 0.0, 1.0) * uHeadI * uHeadMul;
   float h = hd * att;
-  if (h > 0.28) c = mix(c, c * vec3(1.5, 0.8, 0.65) + vec3(0.1, 0.02, 0.01), 0.38);
-  if (h > 0.55) c = mix(c, vec3(0.80, 0.36, 0.22), 0.22 * uMetal + 0.08);
-  #ifdef DBGN
-  c = n * 0.5 + 0.5;
-  #endif
-  gl_FragColor = vec4(c, uCode);
+  if (h > 0.22) c = mix(c, c * vec3(1.45, 0.82, 0.68) + vec3(0.08, 0.02, 0.01), 0.36);
+  if (h > 0.5) c = mix(c, vec3(0.80, 0.36, 0.22), 0.2 * uMetal + 0.06);
+  // alpha carries the material id + a 'faces up' bit for the composite (edge lines, rim rules)
+  float up = n.y > 0.3 ? 1.0 : 0.0;
+  gl_FragColor = vec4(c, (uId * 2.0 + up + 4.0) / 64.0);
 }`;
 
 function hex(h) { return new THREE.Color(h); }
-function toon(base, opt = {}) {
+// Material ids (must match MID_* in composite.js): metal = 2,5,6,11,15,17 ; crimson = 7,8
+function toon(id, base, opt = {}) {
   const b = hex(base);
   const shade = opt.shade ? hex(opt.shade) : b.clone().multiply(new THREE.Color(0.55, 0.55, 0.72));
   const deep = opt.deep ? hex(opt.deep) : shade.clone().multiplyScalar(0.62);
@@ -63,31 +63,36 @@ function toon(base, opt = {}) {
     vertexShader: toonVert, fragmentShader: toonFrag,
     uniforms: {
       uBase: { value: b }, uShade: { value: shade }, uLite: { value: lite }, uHi: { value: hi }, uDeep: { value: deep },
-      uMetal: { value: opt.metal ? 1 : 0 }, uCode: { value: opt.code ?? 1.0 }, uHeadMul: { value: opt.noHead ? 0 : 1 },
+      uMetal: { value: opt.metal ? 1 : 0 }, uId: { value: id }, uHeadMul: { value: opt.noHead ? 0 : 1 },
+      uBias: { value: opt.bias ?? 0 },
       ...toonShared,
     },
     side: THREE.DoubleSide,
-    defines: location.search.includes('dbgn') ? { DBGN: 1 } : {},
   });
 }
 
 // ---------- palette of materials ----------
-// Mostly near-black charcoal + slate-purple cloth, dark gunmetal; crimson is the only saturated family.
+// Near-black charcoal coat, desaturated navy trousers (the medium clothing shape), light gray-blue plates,
+// dark gunmetal; crimson is the only saturated family and is kept small (scarf, sash knot).
 const M = {
-  coat: toon('#211f2c', { lite: '#36334a', shade: '#13121a', deep: '#0a090e' }),
-  coat2: toon('#2e2940', { lite: '#4a4262', shade: '#1a1724', deep: '#0e0c13' }),
-  plate: toon('#464c60', { lite: '#6a7288', shade: '#2a2e3d', deep: '#14161e', hi: '#8f98ac', metal: true, code: 0.8 }),
-  slate: toon('#2b2539', { lite: '#433a5c', shade: '#19151f', deep: '#0e0c13' }),
-  slateDark: toon('#25223a', { lite: '#3a3552', shade: '#16141f', deep: '#0d0c13' }),
-  metal: toon('#2c303e', { lite: '#4f566b', shade: '#181b24', deep: '#0d0f15', hi: '#dde2ec', metal: true, code: 0.8 }),
-  metalDark: toon('#191c26', { lite: '#2e3344', shade: '#10121a', deep: '#0a0b10', hi: '#a9b1c2', metal: true, code: 0.8 }),
-  crimson: toon('#a8162a', { lite: '#e8343a', shade: '#5a0c1c', deep: '#340712', code: 0.6 }),
-  crimsonDark: toon('#7c1222', { lite: '#a81e2c', shade: '#400a16', deep: '#26060f', code: 0.6 }),
-  leather: toon('#262026', { lite: '#3f3139', shade: '#171317', deep: '#0d0a0c' }),
-  wrap: toon('#33303f', { lite: '#4e4a60', shade: '#1f1d28', deep: '#131219' }),
-  blade: toon('#4e576b', { lite: '#98a2b8', shade: '#2e3444', deep: '#1c2029', hi: '#ffffff', metal: true, code: 0.8 }),
-  dark: toon('#121219', { lite: '#1d1d27', shade: '#0b0b10', deep: '#07070a' }),
-  collar: toon('#101017', { lite: '#1a1a24', shade: '#0b0b10', deep: '#07070a', noHead: true }),
+  coat: toon(0, '#1d1b27', { lite: '#302d42', shade: '#121018', deep: '#0a090e', bias: -0.14 }),
+  coat2: toon(1, '#33294a', { lite: '#463a62', shade: '#1c1727', deep: '#0f0c15' }),
+  plate: toon(2, '#4c5468', { lite: '#717a90', shade: '#2c3140', deep: '#171a23', hi: '#9aa3b6', metal: true }),
+  navy: toon(3, '#25314f', { lite: '#2f3d63', shade: '#1b2238', deep: '#111628' }),
+  navyDark: toon(4, '#1c2440', { lite: '#27304f', shade: '#141a2d', deep: '#0d111e' }),
+  metal: toon(5, '#2c303e', { lite: '#4f566b', shade: '#181b24', deep: '#0d0f15', hi: '#dde2ec', metal: true }),
+  metalDark: toon(6, '#191c26', { lite: '#2e3344', shade: '#10121a', deep: '#0a0b10', hi: '#a9b1c2', metal: true }),
+  crimson: toon(7, '#a8162a', { lite: '#d82a34', shade: '#5a0c1c', deep: '#340712' }),
+  crimsonDark: toon(8, '#7c1222', { lite: '#a01c2a', shade: '#400a16', deep: '#26060f' }),
+  leather: toon(9, '#211a1e', { lite: '#352a2d', shade: '#151013', deep: '#0c090b' }),
+  cuff: toon(10, '#3a2e31', { lite: '#4e3e3e', shade: '#221a1d', deep: '#140f11' }),
+  blade: toon(11, '#59627a', { lite: '#6f7a92', shade: '#3a4152', deep: '#232836', hi: '#c8d0de', metal: true }),
+  dark: toon(12, '#121219', { lite: '#1d1d27', shade: '#0b0b10', deep: '#07070a' }),
+  collar: toon(13, '#101017', { lite: '#1a1a24', shade: '#0b0b10', deep: '#07070a', noHead: true }),
+  plum: toon(14, '#2a1d30', { lite: '#38263f', shade: '#1a1220', deep: '#100b14' }),
+  edge: toon(15, '#dde2ec', { lite: '#f2f4f8', shade: '#c2cadb', deep: '#a9b1c2', hi: '#ffffff', metal: true, noHead: true }),
+  bone: toon(16, '#b4ae9f', { lite: '#d9d3c3', shade: '#7c776f', deep: '#4a4646' }),
+  ridge: toon(17, '#8a93a8', { lite: '#b7bfcf', shade: '#5f677b', deep: '#3a4050', hi: '#dde2ec', metal: true }),
 };
 
 // ---------- geometry helpers (all flat shaded) ----------
@@ -183,7 +188,7 @@ function clothChain(parent, pos, segs, mat, { thick = 1.2, tatter = true, lining
       geo = flat(g2);
     }
     mesh(geo, mat, p);
-    if (lining) mesh(geo, lining, p, [0, 0.4, -thick * 0.85], [0, 0, 0], [1.16, 1.07, 0.6]);
+    if (lining) mesh(geo, lining, p, [0, 0.4, -thick * 0.85], [0, 0, 0], [1.07, 1.04, 0.6]);
     out.push(p);
     if (!last) { const n = group(p, [0, -len + 0.3, 0]); n.rotation.order = 'ZXY'; p = n; }
   }
@@ -191,7 +196,8 @@ function clothChain(parent, pos, segs, mat, { thick = 1.2, tatter = true, lining
 }
 
 // ---------- build ----------
-export const DIM = { HIP: 42, HX: 5.5, L1: 17, L2: 17, ANK: 8 };
+export const DIM = { HIP: 44, HX: 5.0, L1: 18, L2: 18, ANK: 8 };
+const LY = 18 / 17;   // leg profile stretch
 
 export function buildCharacter() {
   const R = {};
@@ -202,135 +208,133 @@ export function buildCharacter() {
   root.scale.setScalar(ROOT_SCALE);
   R.tilt = tilt;
 
-  // pelvis
+  // pelvis (narrow: the waist steps in clearly under the chest)
   const pelvis = group(tilt, [0, DIM.HIP, 0], 'Pelvis');
   R.pelvis = pelvis;
-  mesh(tbox(12, 7, 9, { tx: 0.8, tz: 0.9 }), M.slateDark, pelvis, [0, 1, 0]);
+  mesh(tbox(10.5, 7, 8.5, { tx: 0.78, tz: 0.9 }), M.navyDark, pelvis, [0, 1, 0]);
 
-  // ---- legs: ballooning slate trousers into heavy boots ----
+  // ---- legs: desaturated navy trousers (slimmer balloon) into heavy boots ----
   for (const side of ['l', 'r']) {
     const sx = side === 'l' ? 1 : -1;
     const hip = group(pelvis, [sx * DIM.HX, 0, 0], side + 'Thigh');
     hip.rotation.order = 'ZXY';
-    mesh(lathe([[0.1, 1.5], [4.4, 1.5], [5.6, -3], [7.6, -9], [8.5, -13.5], [7.4, -17], [0.1, -18]], 7, side === 'l' ? 0.3 : 0.1),
-      M.slate, hip, [0, 0, 0]);
+    mesh(lathe([[0.1, 1.5], [3.8, 1.5], [4.8, -3], [6.4, -9], [7.2, -13.5], [6.3, -17], [0.1, -18]].map(([r, y]) => [r, y * LY]), 7, side === 'l' ? 0.3 : 0.1),
+      M.navy, hip, [0, 0, 0]);
     const knee = group(hip, [0, -DIM.L1, 0], side + 'Shin');
-    mesh(lathe([[0.1, 1.5], [7.6, 1.0], [8.0, -2.5], [6.6, -6.5], [4.3, -10.5], [3.4, -13], [0.1, -14]], 7, 0.2),
-      M.slate, knee, [0, 0, 0]);
+    mesh(lathe([[0.1, 1.5], [6.4, 1.0], [6.8, -2.5], [5.6, -6.5], [3.8, -10.5], [3.1, -13], [0.1, -14]].map(([r, y]) => [r, y * LY]), 7, 0.2),
+      M.navy, knee, [0, 0, 0]);
     // dark wrap band where the balloon tucks into the boot
-    mesh(lathe([[4.3, -9.6], [5.2, -10.8], [4.1, -12.2]], 7, 0.5), M.dark, knee, [0, 0, 0]);
+    mesh(lathe([[3.8, -10.2], [4.7, -11.5], [3.7, -13.0]], 7, 0.5), M.dark, knee, [0, 0, 0]);
     const ankle = group(knee, [0, -DIM.L2, 0], side + 'Boot');
-    mesh(lathe([[0.1, 6.5], [5.6, 6.5], [5.8, 4.5], [4.6, 3.8], [4.7, -3], [5.1, -6], [0.1, -6]], 6, 0.3), M.leather, ankle, [0, 0, 0]);
-    mesh(lathe([[5.7, 6.4], [6.3, 5.2], [5.8, 4.2]], 6, 0.3), M.metalDark, ankle, [0, 0, 0]);
-    mesh(tbox(7.8, 5.5, 14.5, { tx: 0.9, tz: 0.75, shiftTopZ: -1.5 }), M.leather, ankle, [0, -5.2, 3.0]);
-    mesh(tbox(8.1, 1.7, 15), M.dark, ankle, [0, -7.6, 3.0]);
-    mesh(tbox(7.2, 3, 4, { tx: 0.8 }), M.metalDark, ankle, [0, -5.8, 8.6], [0.2, 0, 0]);
+    mesh(lathe([[0.1, 6.5], [5.4, 6.5], [5.6, 4.5], [4.5, 3.8], [4.6, -3], [5.0, -6], [0.1, -6]], 6, 0.3), M.leather, ankle, [0, 0, 0]);
+    // folded cuff (one value step lighter)
+    mesh(lathe([[5.5, 6.6], [6.2, 5.4], [5.7, 4.0]], 6, 0.3), M.cuff, ankle, [0, 0, 0]);
+    mesh(tbox(7.6, 5.5, 14.5, { tx: 0.9, tz: 0.75, shiftTopZ: -1.5 }), M.leather, ankle, [0, -5.2, 3.0]);
+    mesh(tbox(8.0, 1.7, 15.5), M.dark, ankle, [0, -7.6, 3.4]);
+    // toe cap jutting forward
+    mesh(tbox(7.0, 3.2, 4.6, { tx: 0.82, tz: 0.8 }), M.metal, ankle, [0, -5.9, 10.2], [0.18, 0, 0]);
     R[side + 'Thigh'] = hip; R[side + 'Shin'] = knee; R[side + 'Boot'] = ankle;
   }
 
-  // ---- waist: cinched dark-crimson sash with a front knot ----
+  // ---- waist: narrow dark-crimson sash with a centre-front knot + short dangling tail ----
   const sashY = 4.6;
-  mesh(lathe([[5.4, 2.6], [6.0, 1], [6.1, -1.5], [5.8, -2.8]], 8, 0.2), M.crimsonDark, pelvis, [0, sashY, 0]);
-  mesh(tbox(4.6, 4.2, 3.6, { tx: 0.7 }), M.crimson, pelvis, [3.6, sashY - 0.8, 5.4], [0, 0.35, 0.3]);
-  R.sashA = clothChain(pelvis, [4.2, sashY - 2.5, 5.8], [[3.8, 3.4, 6], [3.4, 3.0, 6], [3.0, 2.6, 6]], M.crimsonDark, { seed: 1 });
-  R.sashB = clothChain(pelvis, [5.6, sashY - 2.5, 4.2], [[3.0, 2.6, 5], [2.6, 2.3, 5], [2.3, 2.0, 5]], M.crimsonDark, { seed: 2 });
+  mesh(lathe([[4.5, 1.7], [5.0, 0.7], [5.0, -1.1], [4.6, -1.9]], 8, 0.2), M.crimsonDark, pelvis, [0, sashY, 0]);
+  mesh(tbox(3.4, 3.2, 2.6, { tx: 0.75 }), M.crimson, pelvis, [0.8, sashY - 0.4, 4.9], [0, 0.2, 0.25]);
+  R.sashA = clothChain(pelvis, [1.2, sashY - 1.8, 5.2], [[2.6, 2.3, 3.5], [2.3, 1.8, 3.5]], M.crimsonDark, { seed: 1 });
   // belt pouch on the right hip
-  mesh(tbox(4, 5, 3.5, { tx: 0.9 }), M.leather, pelvis, [-6.4, sashY - 4.5, 2.5], [0, 0, -0.15]);
-  mesh(tbox(4.4, 1.4, 3.9), M.metalDark, pelvis, [-6.4, sashY - 2.2, 2.5], [0, 0, -0.15]);
-  // ragged coat skirt: front flap, hip panels, back tails (all torn)
-  R.flapF = clothChain(pelvis, [-0.8, 1.5, 6.0], [[8, 7.5, 7], [7.5, 7, 6], [7, 6.5, 7]], M.coat, { thick: 1.0, seed: 3 });
-  R.hipL = clothChain(pelvis, [6.4, 2.5, 1.5], [[6, 6.5, 8], [6.5, 6.5, 8]], M.coat2, { thick: 1.0, seed: 4 });
-  R.hipR = clothChain(pelvis, [-6.6, 2.5, 1.0], [[6, 6.5, 8], [6.5, 6, 7]], M.coat2, { thick: 1.0, seed: 5 });
-  R.tailL = clothChain(pelvis, [3.4, 3, -5.0], [[8, 8, 9], [8, 7, 9], [7, 6.5, 9]], M.coat, { thick: 1.0, seed: 6 });
-  R.tailR = clothChain(pelvis, [-3.4, 3, -5.0], [[8, 7.5, 9], [7.5, 7, 8], [7, 6, 9]], M.coat, { thick: 1.0, seed: 7 });
+  mesh(tbox(3.6, 4.6, 3.2, { tx: 0.9 }), M.leather, pelvis, [-5.4, sashY - 4.2, 2.6], [0, 0, -0.15]);
+  mesh(tbox(4.0, 1.3, 3.6), M.metalDark, pelvis, [-5.4, sashY - 2.0, 2.6], [0, 0, -0.15]);
+  // ragged coat skirt: one long torn flap on the near side (asymmetric), a near hip panel, back tails
+  R.flapF = clothChain(pelvis, [-3.4, 2.0, 5.0], [[6.2, 6.4, 6], [6.4, 6.0, 6], [6.0, 5.6, 7.5]], M.coat2, { thick: 1.0, seed: 3 });
+  R.hipR = clothChain(pelvis, [-6.0, 2.5, 0.6], [[5, 5.5, 7], [5.5, 5, 6]], M.coat, { thick: 1.0, seed: 5 });
+  R.tailL = clothChain(pelvis, [3.0, 3, -4.6], [[7, 7, 8], [7, 6.5, 8], [6.5, 6, 8]], M.coat, { thick: 1.0, seed: 6 });
+  R.tailR = clothChain(pelvis, [-3.0, 3, -4.6], [[7, 6.8, 8], [6.8, 6.4, 8], [6.4, 5.5, 8]], M.coat, { thick: 1.0, seed: 7 });
 
-  // ---- spine / chest: strong V taper ----
+  // ---- spine / chest: V taper, moderate shoulders ----
   const spine = group(pelvis, [0, 5.5, 0], 'Torso');
   spine.rotation.order = 'YXZ';
   R.spine = spine;
-  mesh(tbox(8.6, 8, 7.4, { tx: 1.38, tz: 1.15 }), M.coat, spine, [0, 3.5, 0]);
+  mesh(tbox(7.6, 8, 7.0, { tx: 1.4, tz: 1.12 }), M.coat, spine, [0, 3.5, 0]);
   const chest = group(spine, [0, 7.5, 0], 'Chest');
   R.chest = chest;
-  mesh(tbox(12, 14, 10, { tx: 1.95, tz: 1.12 }), M.coat, chest, [0, 6.5, -0.5]);
+  mesh(tbox(11, 14, 9.6, { tx: 1.45, tz: 1.12 }), M.coat, chest, [0, 6.5, -0.5]);
   // layered breastplate: two angled halves meeting in a centre ridge, pointed lower edge
-  const half = [[0, 12.5], [10.6, 11.5], [10.0, 6.0], [6.5, 1.2], [0, -1.6]];
-  const bpR = group(chest, [0, 1.8, 6.0]);
+  const half = [[0, 12.5], [7.6, 11.6], [7.2, 6.0], [4.8, 1.2], [0, -1.6]];
+  const bpR = group(chest, [0, 1.8, 5.6]);
   bpR.rotation.x = -0.06;
-  mesh(extrude(half.map(([x, y]) => [-x, y]), 3.0), M.plate, bpR, [0, 0, 0], [0, -0.26, 0]);
-  mesh(extrude(half, 3.0), M.plate, bpR, [0, 0, 0], [0, 0.26, 0]);
-  // dark ridge seam
-  mesh(tbox(0.9, 12, 1.2), M.dark, bpR, [0, 5.5, 1.6]);
+  mesh(extrude(half.map(([x, y]) => [-x, y]), 2.6), M.plate, bpR, [0, 0, 0], [0, -0.26, 0]);
+  mesh(extrude(half, 2.6), M.plate, bpR, [0, 0, 0], [0, 0.26, 0]);
+  // bright ridge highlight down the centre
+  mesh(tbox(0.9, 11.5, 1.2), M.ridge, bpR, [0, 5.6, 1.5]);
   // fauld lame below the plate (near-black)
-  mesh(tbox(10.5, 2.6, 2.2, { tx: 1.15 }), M.metalDark, chest, [0, 0.0, 5.0], [-0.08, 0, 0]);
-  // coat lapels flanking the plate
-  mesh(tbox(3.2, 11, 2, { tx: 1.9 }), M.coat2, chest, [-8.6, 7.4, 4.0], [0, 0.45, -0.14]);
-  mesh(tbox(3.2, 11, 2, { tx: 1.9 }), M.coat2, chest, [8.8, 7.4, 3.8], [0, -0.45, 0.14]);
-  // strap lines: under-chest strap + diagonal baldric
-  mesh(tbox(13.4, 1.4, 11.6, { tx: 1.05 }), M.dark, chest, [0, 1.6, -0.4]);
-  mesh(tbox(2.0, 25, 1.2), M.dark, chest, [1.2, 6.2, 7.9], [0, 0, 0.62]);
-  mesh(tbox(2.6, 2.6, 1.6), M.metal, chest, [-4.8, 12.0, 8.0], [0, 0, 0.62]); // buckle on the strap
+  mesh(tbox(9, 2.4, 2.2, { tx: 1.12 }), M.metalDark, chest, [0, 0.0, 4.7], [-0.08, 0, 0]);
+  // coat lapels: a V of dark cloth framing the collar, inner edge in plate gray
+  mesh(tbox(2.4, 9, 1.6, { tx: 1.8 }), M.coat2, chest, [-5.6, 9.2, 5.6], [0.0, 0.35, -0.42]);
+  mesh(tbox(2.4, 9, 1.6, { tx: 1.8 }), M.coat2, chest, [5.6, 9.2, 5.4], [0.0, -0.35, 0.42]);
+  // under-chest strap
+  mesh(tbox(11.4, 1.4, 10.8, { tx: 1.05 }), M.dark, chest, [0, 1.6, -0.4]);
   // back plate + shoulder yoke (near-black gorget)
-  mesh(tbox(16, 12, 3, { tx: 1.2 }), M.metalDark, chest, [0, 7, -5.8]);
-  mesh(tbox(26, 4, 11, { tx: 0.9 }), M.metalDark, chest, [0, 13, -0.5]);
+  mesh(tbox(13, 12, 3, { tx: 1.2 }), M.metalDark, chest, [0, 7, -5.6]);
+  mesh(tbox(18.5, 4, 10.5, { tx: 0.9 }), M.metalDark, chest, [0, 13, -0.6]);
 
-  // collar / neck: dark high collar the flame rises from (no warm band)
+  // collar / neck: dark flared collar the flame rises from (no warm band)
   const neck = group(chest, [0, 15, 0.5], 'Neck');
   R.neck = neck;
-  mesh(lathe([[6.0, -1.5], [7.4, 0.8], [8.4, 2.8], [7.6, 3.4], [0.1, 1.8]], 7, 0.2), M.collar, neck, [0, 0, 0]);
-  mesh(lathe([[7.6, -1.2], [8.6, 0.0], [8.2, 1.4]], 7, 0.0), M.metalDark, neck, [0, 0, 0]);
+  mesh(lathe([[5.2, -1.5], [6.3, 0.8], [7.2, 2.8], [6.5, 3.4], [0.1, 1.8]], 7, 0.2), M.collar, neck, [0, 0, 0]);
+  mesh(lathe([[6.5, -1.2], [7.4, 0.0], [7.0, 1.4]], 7, 0.0), M.metalDark, neck, [0, 0, 0]);
   const headAnchor = group(neck, [0, 2.6, 0.8], 'HeadEnergyRoot');
   R.head = headAnchor;
   const headLight = group(neck, [0, 10, 1.5], 'HeadLight');
   R.headLight = headLight;
 
-  // scarf: a wrap low on the collar + a long tail hanging off the near shoulder
-  mesh(lathe([[7.8, -1.0], [8.9, -2.0], [8.6, -3.6], [7.2, -4.2]], 8, 0.4), M.crimsonDark, neck, [0, 0.0, 0], [0.18, 0, -0.12]);
-  R.scarf = clothChain(neck, [-8.0, -1.8, 0.6], [[7, 6.5, 6], [6.5, 6, 6], [6, 5.5, 6], [5.5, 5.5, 6], [5.5, 5, 6], [5, 4.5, 6], [4.5, 4, 6], [4, 4, 6], [4, 3.5, 7]], M.crimson, { thick: 1.3, seed: 8 });
-  R.scarf2 = clothChain(neck, [-4.5, -2, -5.0], [[4, 3.6, 6], [3.6, 3.2, 6], [3.2, 2.6, 6], [2.6, 2.4, 6], [2.4, 2.2, 6]], M.crimsonDark, { thick: 1.2, seed: 9 });
+  // scarf: a crimson wrap band across the front of the collar + two short tails off the near/back shoulder
+  mesh(lathe([[7.0, -0.2], [8.0, -1.1], [7.8, -2.8], [6.6, -3.3]], 8, 0.4), M.crimson, neck, [0, 0.4, 0.3], [0.22, 0, -0.1]);
+  R.scarf = clothChain(neck, [-5.6, -2.2, -3.4], [[5.2, 4.8, 5.5], [4.8, 4.4, 5.5], [4.4, 4.0, 5.5], [4.0, 3.6, 5.5], [3.6, 3.2, 5.5], [3.2, 2.8, 6]], M.crimson, { thick: 1.3, seed: 8 });
+  R.scarf2 = clothChain(neck, [-3.6, -2, -4.6], [[3.4, 3.0, 5.5], [3.0, 2.6, 5.5], [2.6, 2.3, 5.5], [2.3, 2.0, 5.5]], M.crimsonDark, { thick: 1.2, seed: 9 });
 
-  // tattered half-mantle over the near shoulder, crimson lining only at its edges
-  R.mantle = clothChain(chest, [-11.5, 14.5, -2.5], [[12, 13, 8], [13, 12.5, 8], [12.5, 11.5, 8], [11.5, 10, 9]], M.coat, { thick: 1.2, lining: M.crimsonDark, seed: 10 });
+  // tattered half-mantle hanging behind the near shoulder (frames the body), plum lining at the edges
+  R.mantle = clothChain(chest, [-8.6, 14.0, -4.8], [[10, 10.5, 8], [10.5, 9, 8], [9, 6.5, 9]], M.coat, { thick: 1.2, lining: M.plum, seed: 10 });
 
   // ---- arms ----
   for (const side of ['l', 'r']) {
     const sx = side === 'l' ? 1 : -1;
-    const sh = group(chest, [sx * 13.0, 11.5, -0.5], side + 'Arm');
+    const sh = group(chest, [sx * 9.9, 11.5, -0.5], side + 'Arm');
     sh.rotation.order = 'ZXY';
-    mesh(lathe([[0.1, 2], [3.8, 2], [4.4, -3], [4.2, -8], [3.4, -11.5], [0.1, -12]], 6, 0.3), M.coat2, sh, [0, 0, 0]);
+    mesh(lathe([[0.1, 2], [3.6, 2], [4.2, -3], [4.0, -8], [3.3, -11.5], [0.1, -12]], 6, 0.3), M.coat2, sh, [0, 0, 0]);
     const el = group(sh, [0, -11.5, 0], side + 'Fore');
-    // oversized gauntlet with a hard flared cuff (~1.4x)
-    mesh(lathe([[0.1, 1.5], [3.7, 1.5], [4.3, -2], [5.6, -5.5], [7.6, -8.4], [8.0, -10.0], [6.6, -10.9], [0.1, -11.2]], 6, 0.5), M.plate, el, [0, 0, 0]);
-    mesh(lathe([[4.0, -2.0], [4.8, -3.2], [4.4, -4.4]], 6, 0.5), M.dark, el, [0, 0, 0]);
+    // oversized gauntlet with a hard flared cuff
+    mesh(lathe([[0.1, 1.5], [3.4, 1.5], [3.9, -2], [4.9, -5.5], [6.3, -8.4], [6.6, -10.0], [5.5, -10.9], [0.1, -11.2]], 6, 0.5), M.plate, el, [0, 0, 0]);
+    mesh(lathe([[3.9, -2.0], [4.7, -3.2], [4.3, -4.4]], 6, 0.5), M.dark, el, [0, 0, 0]);
     const hand = group(el, [0, -12, 0], side + 'Hand');
     if (side === 'r') {
       // armoured fist around the grip
-      mesh(tbox(7.4, 7.6, 8.4, { tx: 0.92 }), M.metalDark, hand, [0, -1.8, 0.4]);
-      mesh(tbox(7.8, 2.4, 8.8), M.metal, hand, [0, 1.0, 0.4]);
-      mesh(tbox(2.6, 4.2, 3.2), M.metal, hand, [-3.4, -1.0, 2.6], [0, 0, 0.3]);  // thumb plate
+      mesh(tbox(7.0, 7.4, 8.0, { tx: 0.92 }), M.metalDark, hand, [0, -1.8, 0.4]);
+      mesh(tbox(7.4, 2.2, 8.4), M.metal, hand, [0, 1.0, 0.4]);
+      mesh(tbox(2.4, 4.0, 3.0), M.metal, hand, [-3.2, -1.0, 2.6], [0, 0, 0.3]);  // thumb plate
     } else {
-      // open clawed gauntlet: palm + four splayed, curled fingers with pale claw tips
-      mesh(tbox(7.0, 5.6, 7.6, { tx: 0.95 }), M.metalDark, hand, [0, -1.0, 0.3]);
-      mesh(tbox(7.4, 2.2, 8.0), M.metal, hand, [0, 1.4, 0.3]);
-      const fz = [-2.8, -0.9, 1.0, 2.9];
+      // open claw: a short dark palm + four splayed fingers (1 px gaps) with pale claw tips
+      mesh(tbox(6.4, 4.4, 7.0, { tx: 1.05 }), M.metalDark, hand, [0, -0.6, 0.3]);
+      const fz = [-3.9, -1.3, 1.3, 3.9];
       for (let i = 0; i < 4; i++) {
-        const f = group(hand, [0.4, -3.6, fz[i] + 0.3]);
-        f.rotation.set(0.32 * (i - 1.5), 0, 0.15 + 0.06 * i);
-        mesh(tbox(1.9, 4.2, 1.7, { pivot: 'top' }), M.metalDark, f, [0, 0, 0]);
-        const f2 = group(f, [0, -4.0, 0]);
-        f2.rotation.set(0, 0, 0.55);
-        mesh(flat(new THREE.ConeGeometry(1.0, 3.6, 4).translate(0, -1.8, 0).rotateX(Math.PI)), M.metal, f2, [0, 0, 0]);
+        const f = group(hand, [0.4, -2.6, fz[i] + 0.3]);
+        f.rotation.set(0.3 * (i - 1.5), 0, 0.15 + 0.06 * i);
+        mesh(tbox(1.7, 4.4, 1.5, { pivot: 'top' }), M.metalDark, f, [0, 0, 0]);
+        const f2 = group(f, [0, -4.2, 0]);
+        f2.rotation.set(0, 0, 0.6);
+        mesh(flat(new THREE.ConeGeometry(0.85, 3.2, 4).translate(0, -1.6, 0).rotateX(Math.PI)), M.bone, f2, [0, 0, 0]);
       }
-      const th = group(hand, [-2.6, -1.0, 3.4]);
-      th.rotation.set(0.5, 0, -0.5);
-      mesh(tbox(1.9, 4.6, 1.8, { pivot: 'top' }), M.metalDark, th, [0, 0, 0]);
+      const th = group(hand, [-2.6, -0.6, 3.6]);
+      th.rotation.set(0.6, 0, -0.6);
+      mesh(tbox(1.7, 4.2, 1.6, { pivot: 'top' }), M.metalDark, th, [0, 0, 0]);
     }
     R[side + 'Arm'] = sh; R[side + 'Fore'] = el; R[side + 'Hand'] = hand;
   }
 
   // ---- pauldrons (asymmetric) ----
-  // big layered pauldron on the far (left) shoulder with a swept horn crest
-  const pl = group(R.lArm, [1.0, 1.5, 0], 'PauldronL');
+  // layered pauldron on the far (left) shoulder with a swept horn crest (scaled down for a leaner silhouette)
+  const pl = group(R.lArm, [0.6, 1.2, 0], 'PauldronL');
   pl.rotation.z = -0.35;
+  pl.scale.setScalar(0.68);
   mesh(dome(10.5, 7, 3), M.metal, pl, [1.5, 0, 0], [0, 0, 0], [1.05, 0.72, 1.0]);
   mesh(dome(11.5, 7, 2, Math.PI / 2), M.metalDark, pl, [2.5, -3.6, 0], [0, 0, 0], [1.0, 0.45, 1.0]);
   mesh(dome(11.0, 7, 2, Math.PI / 2), M.metalDark, pl, [3.5, -6.6, 0], [0, 0, 0], [0.95, 0.4, 0.95]);
@@ -347,30 +351,32 @@ export function buildCharacter() {
     hp = n;
   }
   // small pauldron + leather strap on the near (sword) shoulder
-  const pr = group(R.rArm, [-0.5, 1.5, 0], 'PauldronR');
+  const pr = group(R.rArm, [-0.4, 1.4, 0], 'PauldronR');
   pr.rotation.z = 0.25;
+  pr.scale.setScalar(0.88);
   mesh(dome(6.8, 6, 2), M.metalDark, pr, [-0.8, 0, 0], [0, 0, 0], [1.0, 0.75, 1.0]);
   mesh(tbox(2.5, 9, 7), M.leather, pr, [-3.5, -4, 0], [0, 0, 0.25]);
 
-  // ---- weapon: short, broad, slightly curved blade ----
+  // ---- weapon: short, slightly curved blade: bright 1 px edge / mid-gray flat / dark spine ----
   const weapon = group(R.rHand, [0, -1.5, 0.4], 'WeaponRoot');
   weapon.rotation.order = 'XZY';
   R.weapon = weapon;
-  mesh(tbox(2.2, 2.2, 7), M.crimsonDark, weapon, [0, 0, -0.5]);
-  mesh(tbox(3.2, 3.2, 2.4), M.metal, weapon, [0, 0, -4.6]); // pommel
-  mesh(tbox(2.6, 9.5, 2.4, { tx: 0.8 }), M.metalDark, weapon, [0, 0.5, 4.2]);
+  mesh(tbox(2.0, 2.0, 7), M.crimsonDark, weapon, [0, 0, -0.5]);
+  mesh(tbox(3.0, 3.0, 2.2), M.metal, weapon, [0, 0, -4.6]); // pommel
+  mesh(tbox(2.4, 7.5, 2.2, { tx: 0.8 }), M.metalDark, weapon, [0, 0.3, 4.2]);
   const s = new THREE.Shape();
-  s.moveTo(0, -2.4); s.lineTo(12, -3.0); s.lineTo(19, -3.6); s.lineTo(23.5, -2.0);
-  s.lineTo(25.5, 1.4); s.lineTo(20, 2.8); s.lineTo(9, 2.6); s.lineTo(0, 2.4); s.lineTo(0, -2.4);
-  let bg = new THREE.ExtrudeGeometry(s, { depth: 1.6, bevelEnabled: false });
-  bg.translate(0, 0, -0.8);
+  s.moveTo(0, -1.2); s.lineTo(12, -1.4); s.lineTo(19, -1.7); s.lineTo(23.5, -0.9);
+  s.lineTo(25.5, 0.9); s.lineTo(20, 1.3); s.lineTo(9, 1.2); s.lineTo(0, 1.1); s.lineTo(0, -1.2);
+  let bg = new THREE.ExtrudeGeometry(s, { depth: 1.2, bevelEnabled: false });
+  bg.translate(0, 0, -0.6);
   bg.rotateY(-Math.PI / 2); // shape x -> +z
   bg = flat(bg);
   mesh(bg, M.blade, weapon, [0, 0, 5.2]);
-  mesh(tbox(1.9, 1.2, 17), M.metalDark, weapon, [0, 1.6, 13.9]);
+  mesh(tbox(1.4, 0.7, 23), M.edge, weapon, [0, -1.45, 16.4], [0.02, 0, 0]);   // cutting edge
+  mesh(tbox(1.4, 0.7, 17), M.dark, weapon, [0, 1.35, 13.9]);                 // spine line
   R.bladeTip = group(weapon, [0, 0.5, 29.9], 'tip');
   R.bladeMid = group(weapon, [0, 0, 11.4], 'mid');
-  R.bladeEdge = group(weapon, [0, -2.6, 22.0], 'edge');
+  R.bladeEdge = group(weapon, [0, -1.5, 22.0], 'edge');
 
   root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
   return R;
@@ -398,58 +404,75 @@ function solveLeg(thigh, shin, boot, hipPos, target, toe) {
 const _hip = new THREE.Vector3(), _tgt = new THREE.Vector3();
 const TILT_TAN = Math.tan(0.1);
 
-function setChain(chain, angles) {
-  for (let i = 0; i < chain.length; i++) {
-    const a = angles[i];
-    chain[i].rotation.x = a[0];
-    chain[i].rotation.z = a[1];
-  }
-}
-
-// cloth angles: pure function of u (lagged samples of the drive signals)
-function clothAngles(u, n, { ripple = 0, curlZ = 0, zGain = 0, base = 0.0, baseZ = 0, curl = 0.05, gain = 0.012, lag = 0.045, flut = 0.12, flutF = 10, twistGain = 0.08, hipGain = 0.01, phase = 0, sX = 0, sZ = 0, sFlut = 0.25 }) {
-  const out = [];
+// cloth: pure function of u (lagged samples of the drive signals), written straight into the chain
+const CLOTH_DEF = { ripple: 0, curlZ: 0, zGain: 0, base: 0.0, baseZ: 0, curl: 0.05, gain: 0.012, lag: 0.045, flut: 0.12, flutF: 10, twistGain: 0.08, hipGain: 0.01, phase: 0, sX: 0, sZ: 0, sFlut: 0.25, sway: 0 };
+const cp = (o) => Object.assign({}, CLOTH_DEF, o);
+function clothApply(chain, u, P) {
+  const n = chain.length;
+  const sway = P.sway * Math.sin(TAU * 2 * u / LOOP + P.phase);
   for (let i = 0; i < n; i++) {
-    const d = drive(u - lag * (i + 1));
+    const d = drive(u - P.lag * (i + 1));
     const k = (i + 1) / n;
-    // flag streaming during the strike/hold (lagged per segment so it unrolls)
     const st = d.stream;
-    let ax = (i === 0 ? base : curl)
-      + gain * d.vTravel * (i === 0 ? 1.0 : 0.3) * (d.vTravel < 0 ? 0.6 : 1.0)
-      + hipGain * d.vHip
-      + flut * Math.sin(TAU * flutF * u / LOOP - i * 0.9 + phase) * (0.4 + k) + ripple * Math.sin(TAU * (flutF + 4) * u / LOOP - i * 1.6 + phase) * k;
-    let az = (i === 0 ? baseZ : curlZ) + zGain * d.vTravel * (0.5 + 0.5 * k) - twistGain * d.vTwist * (0.4 + k) * 0.5
-      + flut * 0.6 * Math.sin(TAU * (flutF - 3) * u / LOOP - i * 0.7 + phase * 1.7) + ripple * Math.sin(TAU * flutF * u / LOOP - i * 1.3 + phase * 2.3) * (0.3 + k);
+    // soft-limit the torso-twist drive so the whip never flicks the cloth straight up
+    const vT = 4 * Math.tanh(d.vTwist / 4);
+    let ax = (i === 0 ? P.base + sway : P.curl)
+      + P.gain * d.vTravel * (i === 0 ? 1.0 : 0.3) * (d.vTravel < 0 ? 0.6 : 1.0)
+      + P.hipGain * d.vHip
+      + P.flut * Math.sin(TAU * P.flutF * u / LOOP - i * 0.9 + P.phase) * (0.4 + k) + P.ripple * Math.sin(TAU * (P.flutF + 4) * u / LOOP - i * 1.6 + P.phase) * k;
+    let az = (i === 0 ? P.baseZ : P.curlZ) + P.zGain * d.vTravel * (0.5 + 0.5 * k) - P.twistGain * vT * (0.4 + k) * 0.5
+      + P.flut * 0.6 * Math.sin(TAU * (P.flutF - 3) * u / LOOP - i * 0.7 + P.phase * 1.7) + P.ripple * Math.sin(TAU * P.flutF * u / LOOP - i * 1.3 + P.phase * 2.3) * (0.3 + k);
     if (st > 0) {
-      const wave = Math.sin(TAU * 24 * u / LOOP - i * 1.25 + phase);
-      ax += st * ((i === 0 ? sX : -0.06 * sX) + sFlut * wave * k);
-      az += st * ((i === 0 ? sZ : sZ * 0.08) + sFlut * 0.5 * Math.sin(TAU * 20 * u / LOOP - i * 1.1 + phase) * k);
+      // flag streaming during the strike/hold (lagged per segment so it unrolls)
+      const wave = Math.sin(TAU * 24 * u / LOOP - i * 1.25 + P.phase);
+      ax += st * ((i === 0 ? P.sX : -0.06 * P.sX) + P.sFlut * wave * k);
+      az += st * ((i === 0 ? P.sZ : P.sZ * 0.08) + P.sFlut * 0.5 * Math.sin(TAU * 20 * u / LOOP - i * 1.1 + P.phase) * k);
+      if (i > 0 && st > 0.05) az = clamp(az, -0.5, 0.6);   // stays near horizontal behind the strike
     }
-    ax = clamp(ax, -1.3, 1.6); az = clamp(az, -1.4, 1.0);
-    out.push([ax, az]);
+    chain[i].rotation.x = clamp(ax, -1.3, 1.6);
+    chain[i].rotation.z = clamp(az, -1.4, 1.0);
   }
-  return out;
 }
 
-export function applyPose(R, u, { cloth = true } = {}) {
-  const p = pose(u);
+const CP = {
+  scarf: cp({ ripple: 0.14, curlZ: 0.1, base: 0.22, baseZ: -0.2, curl: 0.03, gain: 0.005, zGain: -0.006, lag: 0.05, flut: 0.18, flutF: 12, twistGain: 0.1, hipGain: 0.003, sX: 0.45, sZ: -1.15, sFlut: 0.3, sway: 0.12 }),
+  scarf2: cp({ ripple: 0.13, curlZ: 0.08, base: 0.3, baseZ: -0.2, curl: 0.02, gain: 0.0045, zGain: -0.005, lag: 0.055, flut: 0.17, flutF: 13, twistGain: 0.08, phase: 1.3, sX: 0.4, sZ: -1.0, sFlut: 0.28, sway: 0.12 }),
+  mantle: cp({ ripple: 0.08, curlZ: 0.04, base: 0.22, baseZ: -0.3, curl: 0.04, gain: 0.0045, zGain: -0.004, lag: 0.05, flut: 0.08, flutF: 9, twistGain: 0.08, hipGain: 0.005, phase: 2.6, sX: 0.26, sZ: -0.1, sFlut: 0.22, sway: 0.06 }),
+  sashA: cp({ base: 0.1, baseZ: 0.1, curl: 0.04, gain: 0.01, lag: 0.04, flut: 0.09, flutF: 9, twistGain: 0.1, phase: 0.4, sX: 0.5, sZ: -0.2 }),
+  flapF: cp({ base: -0.1, curl: -0.02, gain: 0.006, lag: 0.04, flut: 0.05, flutF: 8, twistGain: 0.04, phase: 0.9, sX: 0.25 }),
+  hipR: cp({ base: 0.05, baseZ: -0.12, curl: 0.03, gain: 0.006, lag: 0.045, flut: 0.05, flutF: 10, twistGain: 0.05, phase: 2.9 }),
+  tailL: cp({ base: 0.22, baseZ: 0.08, curl: 0.06, gain: 0.012, lag: 0.05, flut: 0.08, flutF: 9, twistGain: 0.08, phase: 3.0, sX: 0.45, sway: 0.05 }),
+  tailR: cp({ base: 0.25, baseZ: -0.08, curl: 0.06, gain: 0.012, lag: 0.055, flut: 0.08, flutF: 10, twistGain: 0.08, phase: 4.1, sX: 0.45, sway: 0.05 }),
+};
+
+const _p = {};
+const LEGS = ['l', 'r'].map((sd) => ({ sx: sd === 'l' ? 1 : -1, fx: sd + 'Fx', fz: sd + 'Fz', lift: sd + 'Lift', toe: sd + 'Toe', thigh: sd + 'Thigh', shin: sd + 'Shin', boot: sd + 'Boot' }));
+// applyPose(R, u, {cloth, snap}): snap(x) returns the pixel-snapped root x. The planted feet are
+// counter-shifted by the snap offset so they stay fixed in the world while the body snaps.
+export function applyPose(R, u, { cloth = true, snap = null } = {}) {
+  const p = pose(u, _p);
   const sx = Math.sin(WALK_YAW), sz = Math.cos(WALK_YAW);
-  R.root.position.set(X0 + p.travel * sx, 0, p.travel * sz);
+  const rawX = X0 + p.travel * sx;
+  const rx = snap ? snap(rawX) : rawX;
+  R.root.position.set(rx, 0, p.travel * sz);
   R.root.rotation.y = p.yaw;
+  const dxw = (rx - rawX) / ROOT_SCALE;
+  const cy = Math.cos(p.yaw), sy = Math.sin(p.yaw);
   R.pelvis.position.y = DIM.HIP + p.hipY;
   R.pelvis.rotation.set(0, 0, p.pRoll);
   R.spine.rotation.set(p.tPitch, p.tYaw, p.tRoll);
   const br = 1 + 0.025 * p.breathPhase * p.breath;
-  R.chest.scale.set(br, 1, br);
+  R.chest.scale.set(br * (1 + 0.03 * p.squash), 1 - 0.04 * p.squash, br);
 
-  for (const side of ['l', 'r']) {
-    const sxs = side === 'l' ? 1 : -1;
-    _hip.set(sxs * DIM.HX, DIM.HIP + p.hipY, 0);
-    _hip.y += sxs * DIM.HX * Math.sin(p.pRoll);
+  for (let j = 0; j < 2; j++) {
+    const L = LEGS[j];
+    _hip.set(L.sx * DIM.HX, DIM.HIP + p.hipY, 0);
+    _hip.y += L.sx * DIM.HX * Math.sin(p.pRoll);
+    const fx = p[L.fx] - dxw * cy, fz = p[L.fz] - dxw * sy;
     // compensate the body tilt so planted feet stay on the floor line wherever they are in depth
-    _tgt.set(p[side + 'Fx'], DIM.ANK + p[side + 'Lift'] + p[side + 'Fz'] * TILT_TAN, p[side + 'Fz']);
-    solveLeg(R[side + 'Thigh'], R[side + 'Shin'], R[side + 'Boot'], _hip, _tgt, p[side + 'Toe']);
-    R[side + 'Thigh'].rotation.z -= p.pRoll;
+    _tgt.set(fx, DIM.ANK + p[L.lift] + fz * TILT_TAN, fz);
+    solveLeg(R[L.thigh], R[L.shin], R[L.boot], _hip, _tgt, p[L.toe]);
+    R[L.thigh].rotation.z -= p.pRoll;
   }
 
   R.rArm.rotation.set(-p.rShF, 0, p.rShZ);
@@ -460,18 +483,9 @@ export function applyPose(R, u, { cloth = true } = {}) {
   R.lHand.rotation.set(-p.lWr, 0, 0);
 
   if (cloth) {
-    setChain(R.scarf, clothAngles(u, R.scarf.length, { ripple: 0.16, curlZ: 0.12, base: -0.05, baseZ: -0.3, curl: 0.03, gain: 0.012, zGain: -0.02, lag: 0.05, flut: 0.11, flutF: 12, twistGain: 0.1, hipGain: 0.006, sX: 1.25, sZ: -0.55, sFlut: 0.3 }));
-    setChain(R.scarf2, clothAngles(u, R.scarf2.length, { ripple: 0.15, curlZ: 0.1, base: 0.38, baseZ: -0.25, curl: 0.02, gain: 0.01, zGain: -0.016, lag: 0.055, flut: 0.1, flutF: 13, twistGain: 0.08, phase: 1.3, sX: 1.1, sZ: -0.35, sFlut: 0.28 }));
-    setChain(R.mantle, clothAngles(u, R.mantle.length, { ripple: 0.08, curlZ: 0.04, base: 0.22, baseZ: -0.52, curl: 0.04, gain: 0.0045, zGain: -0.004, lag: 0.05, flut: 0.06, flutF: 9, twistGain: 0.08, hipGain: 0.005, phase: 2.6, sX: 0.38, sZ: -0.1, sFlut: 0.22 }));
-    setChain(R.sashA, clothAngles(u, R.sashA.length, { base: 0.1, baseZ: 0.18, curl: 0.04, gain: 0.01, lag: 0.04, flut: 0.07, flutF: 9, twistGain: 0.1, phase: 0.4, sX: 0.5, sZ: -0.2 }));
-    setChain(R.sashB, clothAngles(u, R.sashB.length, { base: 0.1, baseZ: 0.1, curl: 0.04, gain: 0.01, lag: 0.05, flut: 0.07, flutF: 11, twistGain: 0.1, phase: 2.2, sX: 0.5, sZ: -0.2 }));
-    setChain(R.flapF, clothAngles(u, R.flapF.length, { base: -0.12, curl: -0.03, gain: 0.006, lag: 0.04, flut: 0.04, flutF: 8, twistGain: 0.04, phase: 0.9 }));
-    setChain(R.hipL, clothAngles(u, R.hipL.length, { base: 0.05, baseZ: 0.12, curl: 0.03, gain: 0.006, lag: 0.04, flut: 0.04, flutF: 9, twistGain: 0.05, phase: 1.7 }));
-    setChain(R.hipR, clothAngles(u, R.hipR.length, { base: 0.05, baseZ: -0.12, curl: 0.03, gain: 0.006, lag: 0.045, flut: 0.04, flutF: 10, twistGain: 0.05, phase: 2.9 }));
-    setChain(R.tailL, clothAngles(u, R.tailL.length, { base: 0.22, baseZ: 0.08, curl: 0.06, gain: 0.012, lag: 0.05, flut: 0.06, flutF: 9, twistGain: 0.08, phase: 3.0, sX: 0.45 }));
-    setChain(R.tailR, clothAngles(u, R.tailR.length, { base: 0.25, baseZ: -0.08, curl: 0.06, gain: 0.012, lag: 0.055, flut: 0.06, flutF: 10, twistGain: 0.08, phase: 4.1, sX: 0.45 }));
+    for (const k in CP) clothApply(R[k], u, CP[k]);
     R.flapF[0].rotation.x -= p.tPitch * 0.2;
-    // mantle hangs with gravity: counter the torso pitch/twist a little
+    // mantle hangs with gravity: counter the torso pitch a little
     R.mantle[0].rotation.x -= p.tPitch * 0.6;
   }
   return p;
